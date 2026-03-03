@@ -1,0 +1,129 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "TLS Client",
+  "projectDescription": "HTTP client library with advanced TLS fingerprinting to mimic Chrome, Firefox, Safari, and other browsers across HTTP/1.1, HTTP/2, and HTTP/3",
+  "theme": "aspen",
+  "primaryColor": "#2563eb",
+  "lightColor": "#3b82f6",
+  "darkColor": "#1e40af",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/tls-fingerprinting",
+              "concepts/client-profiles",
+              "concepts/http-protocols"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/basic-usage",
+              "guides/client-options",
+              "guides/proxy-configuration",
+              "guides/cookie-management",
+              "guides/websocket-connections",
+              "guides/protocol-racing",
+              "guides/bandwidth-tracking",
+              "guides/certificate-pinning",
+              "guides/request-hooks"
+            ]
+          },
+          {
+            "group": "Language Bindings",
+            "pages": [
+              "bindings/overview",
+              "bindings/nodejs",
+              "bindings/python",
+              "bindings/csharp"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Client",
+            "pages": [
+              "api/http-client",
+              "api/client-options",
+              "api/websocket"
+            ]
+          },
+          {
+            "group": "Profiles",
+            "pages": [
+              "api/profiles",
+              "api/available-profiles"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "api/transport-options",
+              "api/bandwidth-tracker",
+              "api/hooks"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "TLS fingerprinting to mimic Chrome, Firefox, Safari, and other browsers",
+    "Full HTTP/1.1, HTTP/2, and HTTP/3 protocol support with automatic negotiation",
+    "Protocol racing (Happy Eyeballs) between HTTP/2 and HTTP/3",
+    "Custom HTTP header ordering for accurate browser emulation",
+    "WebSocket support with consistent TLS fingerprinting",
+    "HTTP and SOCKS5 proxy support with authentication",
+    "Built-in cookie jar management",
+    "Certificate pinning for enhanced security",
+    "Bandwidth tracking for monitoring upload/download usage",
+    "Language bindings for JavaScript (Node.js), Python, and C# via FFI"
+  ],
+  "publicApiSurface": [
+    "NewHttpClient",
+    "HttpClient.Do",
+    "HttpClient.Get",
+    "HttpClient.Post",
+    "HttpClient.Head",
+    "HttpClient.SetProxy",
+    "HttpClient.SetCookies",
+    "HttpClient.GetCookies",
+    "HttpClient.SetFollowRedirect",
+    "HttpClient.GetBandwidthTracker",
+    "HttpClient.AddPreRequestHook",
+    "HttpClient.AddPostResponseHook",
+    "NewWebsocket",
+    "Websocket.Connect",
+    "NewCookieJar",
+    "WithClientProfile",
+    "WithProxyUrl",
+    "WithTimeoutSeconds",
+    "WithCookieJar",
+    "WithProtocolRacing",
+    "WithForceHttp1",
+    "WithDisableHttp3",
+    "WithRandomTLSExtensionOrder",
+    "WithCertificatePinning",
+    "WithBandwidthTracker",
+    "WithPreHook",
+    "WithPostHook",
+    "profiles.Chrome_144",
+    "profiles.Firefox_147",
+    "profiles.Safari_IOS_18_5"
+  ]
+}
