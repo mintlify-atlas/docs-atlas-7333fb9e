@@ -87,7 +87,9 @@
             "pages": [
               "api/transport-options",
               "api/bandwidth-tracker",
-              "api/hooks"
+              "api/hooks",
+              "api/cookie-jar",
+              "api/logger"
             ]
           }
         ]

@@ -1,0 +1,297 @@
+---
+title: Logger
+description: API reference for the Logger interface and implementations
+---
+
+## Logger interface
+
+The `Logger` interface provides structured logging for the TLS Client library. All client operations that generate logs use this interface.
+
+```go
+type Logger interface {
+    Debug(format string, args ...any)
+    Info(format string, args ...any)
+    Warn(format string, args ...any)
+    Error(format string, args ...any)
+}
+```
+
+### Methods
+
+<ParamField path="Debug" type="func(format string, args ...any)">
+  Log debug-level messages. Only shown when debug logging is enabled.
+</ParamField>
+
+<ParamField path="Info" type="func(format string, args ...any)">
+  Log informational messages.
+</ParamField>
+
+<ParamField path="Warn" type="func(format string, args ...any)">
+  Log warning messages.
+</ParamField>
+
+<ParamField path="Error" type="func(format string, args ...any)">
+  Log error messages.
+</ParamField>
+
+All methods use printf-style formatting with a format string and optional arguments.
+
+## NewNoopLogger
+
+Creates a logger that discards all log messages. This is the recommended logger for production use when you don't need logging.
+
+```go
+func NewNoopLogger() Logger
+```
+
+**Example:**
+
+```go
+import tls_client "github.com/bogdanfinn/tls-client"
+
+// Create a client with no logging
+client, err := tls_client.NewHttpClient(
+    tls_client.NewNoopLogger(),
+    tls_client.WithClientProfile(profiles.Chrome_144),
+)
+```
+
+<Tip>
+  Use `NewNoopLogger()` in production to avoid logging overhead.
+</Tip>
+
+## NewLogger
+
+Creates a logger that prints Info, Warn, and Error messages to stdout. Debug messages are discarded.
+
+```go
+func NewLogger() Logger
+```
+
+**Example:**
+
+```go
+import tls_client "github.com/bogdanfinn/tls-client"
+
+// Create a client with basic logging
+client, err := tls_client.NewHttpClient(
+    tls_client.NewLogger(),
+    tls_client.WithClientProfile(profiles.Chrome_144),
+)
+
+// Info, Warn, and Error messages will be printed
+// Debug messages are still discarded
+```
+
+## NewDebugLogger
+
+Creates a logger wrapper that enables debug logging. This wraps an existing logger and enables Debug messages to be printed to stdout.
+
+```go
+func NewDebugLogger(logger Logger) Logger
+```
+
+<ParamField path="logger" type="Logger">
+  The base logger to wrap. Debug messages will be printed to stdout, while other messages are forwarded to this logger.
+</ParamField>
+
+**Example:**
+
+```go
+import tls_client "github.com/bogdanfinn/tls-client"
+
+// Enable debug logging
+client, err := tls_client.NewHttpClient(
+    tls_client.NewDebugLogger(tls_client.NewLogger()),
+    tls_client.WithClientProfile(profiles.Chrome_144),
+)
+
+// All log levels (Debug, Info, Warn, Error) will be printed
+```
+
+<Note>
+  `NewDebugLogger()` only affects Debug messages. You can also use the `WithDebug()` client option to enable comprehensive debug output.
+</Note>
+
+## Logger comparison
+
+| Logger | Debug | Info | Warn | Error | Use case |
+|--------|-------|------|------|-------|----------|
+| `NewNoopLogger()` | ✗ | ✗ | ✗ | ✗ | Production (no logging overhead) |
+| `NewLogger()` | ✗ | ✓ | ✓ | ✓ | Production (basic logging) |
+| `NewDebugLogger(NewLogger())` | ✓ | ✓ | ✓ | ✓ | Development (full logging) |
+
+## Custom logger implementation
+
+You can implement your own logger to integrate with your logging infrastructure:
+
+```go
+import (
+    "log"
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+type CustomLogger struct {
+    logger *log.Logger
+}
+
+func (l *CustomLogger) Debug(format string, args ...any) {
+    l.logger.Printf("[DEBUG] "+format, args...)
+}
+
+func (l *CustomLogger) Info(format string, args ...any) {
+    l.logger.Printf("[INFO] "+format, args...)
+}
+
+func (l *CustomLogger) Warn(format string, args ...any) {
+    l.logger.Printf("[WARN] "+format, args...)
+}
+
+func (l *CustomLogger) Error(format string, args ...any) {
+    l.logger.Printf("[ERROR] "+format, args...)
+}
+
+// Use the custom logger
+logger := &CustomLogger{
+    logger: log.New(os.Stdout, "", log.LstdFlags),
+}
+
+client, err := tls_client.NewHttpClient(
+    logger,
+    tls_client.WithClientProfile(profiles.Chrome_144),
+)
+```
+
+## Integration with popular loggers
+
+### Logrus
+
+```go
+import (
+    "github.com/sirupsen/logrus"
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+type LogrusAdapter struct {
+    logger *logrus.Logger
+}
+
+func (l *LogrusAdapter) Debug(format string, args ...any) {
+    l.logger.Debugf(format, args...)
+}
+
+func (l *LogrusAdapter) Info(format string, args ...any) {
+    l.logger.Infof(format, args...)
+}
+
+func (l *LogrusAdapter) Warn(format string, args ...any) {
+    l.logger.Warnf(format, args...)
+}
+
+func (l *LogrusAdapter) Error(format string, args ...any) {
+    l.logger.Errorf(format, args...)
+}
+
+// Use with TLS Client
+logger := &LogrusAdapter{
+    logger: logrus.New(),
+}
+
+client, err := tls_client.NewHttpClient(
+    logger,
+    tls_client.WithClientProfile(profiles.Chrome_144),
+)
+```
+
+### Zap
+
+```go
+import (
+    "go.uber.org/zap"
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+type ZapAdapter struct {
+    logger *zap.SugaredLogger
+}
+
+func (l *ZapAdapter) Debug(format string, args ...any) {
+    l.logger.Debugf(format, args...)
+}
+
+func (l *ZapAdapter) Info(format string, args ...any) {
+    l.logger.Infof(format, args...)
+}
+
+func (l *ZapAdapter) Warn(format string, args ...any) {
+    l.logger.Warnf(format, args...)
+}
+
+func (l *ZapAdapter) Error(format string, args ...any) {
+    l.logger.Errorf(format, args...)
+}
+
+// Use with TLS Client
+zapLogger, _ := zap.NewProduction()
+logger := &ZapAdapter{
+    logger: zapLogger.Sugar(),
+}
+
+client, err := tls_client.NewHttpClient(
+    logger,
+    tls_client.WithClientProfile(profiles.Chrome_144),
+)
+```
+
+## Logging in cookie jars
+
+Cookie jars also support custom loggers for debugging cookie operations:
+
+```go
+// Create a cookie jar with debug logging
+jar := tls_client.NewCookieJar(
+    tls_client.WithDebugLogger(),
+)
+
+// Or use a custom logger
+jar := tls_client.NewCookieJar(
+    tls_client.WithLogger(myCustomLogger),
+)
+```
+
+See the [Cookie jar API reference](/api/cookie-jar#withlogger) for details.
+
+## What gets logged
+
+Different components log different information:
+
+### Client operations
+- Request URLs and methods
+- Response status codes
+- Cookie operations (set, get)
+- Proxy configuration changes
+- Redirect behavior
+- Connection errors
+
+### Debug mode (WithDebug option)
+- Raw request bytes sent over the wire
+- Raw response bytes received
+- Request and response headers
+- Request and response body content
+- Protocol negotiation details
+
+<Warning>
+  Debug mode logs sensitive information including request/response bodies. Never use `WithDebug()` in production with sensitive data.
+</Warning>
+
+### Cookie jar operations
+- Cookies being added to the jar
+- Cookies being skipped (with `WithSkipExisting()`)
+- Empty cookies being filtered
+- Expired cookies being excluded
+
+## Related
+
+- [WithDebug()](/api/client-options#withdebug) - Enable comprehensive debug logging
+- [Cookie jar logging](/api/cookie-jar#withlogger) - Configure logging for cookie operations
+- [NewHttpClient()](/api/http-client#newhttpclient) - Create a client with a logger

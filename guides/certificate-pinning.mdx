@@ -72,8 +72,12 @@ if err != nil {
 // Make request - certificate will be validated against pins
 resp, err := client.Get("https://api.example.com/data")
 if err != nil {
-    log.Printf("Request failed: %v", err)
-    // Could be a bad pin error
+    // Check if it's a bad pin error
+    if errors.Is(err, tls_client.ErrBadPinDetected) {
+        log.Printf("Certificate pin validation failed: %v", err)
+    } else {
+        log.Printf("Request failed: %v", err)
+    }
 }
 ```
 
@@ -156,6 +160,35 @@ Or pass `nil` to skip the handler:
 ```go
 tls_client.WithCertificatePinning(pins, nil)
 ```
+
+## Error handling
+
+When a pin validation fails, the request returns an `ErrBadPinDetected` error:
+
+```go
+import (
+    "errors"
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+resp, err := client.Get("https://api.example.com")
+if err != nil {
+    if errors.Is(err, tls_client.ErrBadPinDetected) {
+        // Certificate pin validation failed
+        // The server's certificate doesn't match any of the pinned certificates
+        log.Printf("SECURITY WARNING: Certificate pin mismatch for %s", req.URL.Host)
+        
+        // Take appropriate action:
+        // - Alert your security team
+        // - Log detailed information
+        // - Fail closed (don't proceed with request)
+    }
+}
+```
+
+<Warning>
+  Always fail closed when certificate pinning detects a mismatch. This could indicate a man-in-the-middle attack.
+</Warning>
 
 ## Complete example
 

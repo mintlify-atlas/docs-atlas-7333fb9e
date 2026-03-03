@@ -1,0 +1,249 @@
+---
+title: Cookie jar
+description: API reference for the CookieJar interface and options
+---
+
+## CookieJar interface
+
+The `CookieJar` interface extends the standard `http.CookieJar` with additional functionality for managing cookies across requests.
+
+```go
+type CookieJar interface {
+    http.CookieJar
+    GetAllCookies() map[string][]*http.Cookie
+}
+```
+
+### Methods
+
+<ParamField path="SetCookies" type="func(u *url.URL, cookies []*http.Cookie)">
+  Sets cookies for a specific URL. Inherited from `http.CookieJar`.
+</ParamField>
+
+<ParamField path="Cookies" type="func(u *url.URL) []*http.Cookie">
+  Returns the cookies to send in a request to the given URL. Inherited from `http.CookieJar`.
+</ParamField>
+
+<ParamField path="GetAllCookies" type="func() map[string][]*http.Cookie">
+  Returns all cookies stored in the jar, organized by host. This is a TLS Client-specific extension.
+</ParamField>
+
+## NewCookieJar
+
+Creates a new cookie jar with optional configuration.
+
+```go
+func NewCookieJar(options ...CookieJarOption) CookieJar
+```
+
+<ParamField path="options" type="...CookieJarOption">
+  Variable number of cookie jar options. See below for available options.
+</ParamField>
+
+**Example:**
+
+```go
+import tls_client "github.com/bogdanfinn/tls-client"
+
+// Create a basic cookie jar
+jar := tls_client.NewCookieJar()
+
+// Create a cookie jar with options
+jar := tls_client.NewCookieJar(
+    tls_client.WithSkipExisting(),
+    tls_client.WithDebugLogger(),
+)
+```
+
+## Cookie jar options
+
+### WithSkipExisting
+
+Skip setting cookies that already exist in the jar. By default, existing cookies are overwritten when new cookies with the same name are set.
+
+```go
+func WithSkipExisting() CookieJarOption
+```
+
+**Example:**
+
+```go
+// Create a jar that won't overwrite existing cookies
+jar := tls_client.NewCookieJar(
+    tls_client.WithSkipExisting(),
+)
+
+// This is useful when you set cookies manually
+// and don't want the server to overwrite them
+u, _ := url.Parse("https://example.com")
+jar.SetCookies(u, []*http.Cookie{
+    {Name: "session", Value: "abc123"},
+})
+
+// Even if the server tries to set a new "session" cookie,
+// it will be ignored because WithSkipExisting() is enabled
+```
+
+<Note>
+  This option is useful when you need to maintain specific cookie values that shouldn't be overwritten by server responses.
+</Note>
+
+### WithAllowEmptyCookies
+
+Allow cookies with empty values to be stored in the jar. By default, empty cookies are filtered out.
+
+```go
+func WithAllowEmptyCookies() CookieJarOption
+```
+
+**Example:**
+
+```go
+// Allow cookies with empty values
+jar := tls_client.NewCookieJar(
+    tls_client.WithAllowEmptyCookies(),
+)
+
+// Now cookies like this will be stored
+u, _ := url.Parse("https://example.com")
+jar.SetCookies(u, []*http.Cookie{
+    {Name: "empty_cookie", Value: ""},  // Will be kept with this option
+})
+```
+
+### WithDebugLogger
+
+Enable debug logging for cookie operations. This will print cookie-related debug information to stdout.
+
+```go
+func WithDebugLogger() CookieJarOption
+```
+
+**Example:**
+
+```go
+// Enable debug logging for the cookie jar
+jar := tls_client.NewCookieJar(
+    tls_client.WithDebugLogger(),
+)
+
+// This will log when cookies are added, skipped, or filtered
+```
+
+<Tip>
+  Use `WithDebugLogger()` during development to understand how cookies are being handled.
+</Tip>
+
+### WithLogger
+
+Set a custom logger for cookie jar operations.
+
+```go
+func WithLogger(logger Logger) CookieJarOption
+```
+
+<ParamField path="logger" type="Logger">
+  A custom logger implementing the Logger interface. See the [Logger API reference](/api/logger) for details.
+</ParamField>
+
+**Example:**
+
+```go
+// Use a custom logger
+myLogger := &CustomLogger{}
+jar := tls_client.NewCookieJar(
+    tls_client.WithLogger(myLogger),
+)
+```
+
+## GetAllCookies example
+
+Retrieve all cookies stored in the jar, organized by host:
+
+```go
+jar := tls_client.NewCookieJar()
+
+// Set some cookies
+u1, _ := url.Parse("https://example.com")
+jar.SetCookies(u1, []*http.Cookie{
+    {Name: "session", Value: "abc123"},
+})
+
+u2, _ := url.Parse("https://api.example.com")
+jar.SetCookies(u2, []*http.Cookie{
+    {Name: "token", Value: "xyz789"},
+})
+
+// Get all cookies
+allCookies := jar.GetAllCookies()
+
+// Output: map[string][]*http.Cookie
+// {
+//     "example.com": []*http.Cookie{...},
+//     "api.example.com": []*http.Cookie{...},
+// }
+
+for host, cookies := range allCookies {
+    fmt.Printf("Host: %s\n", host)
+    for _, cookie := range cookies {
+        fmt.Printf("  %s = %s\n", cookie.Name, cookie.Value)
+    }
+}
+```
+
+## Cookie filtering behavior
+
+The cookie jar automatically filters cookies based on the following rules:
+
+### Empty cookie filtering
+
+By default, cookies with empty values are filtered out unless `WithAllowEmptyCookies()` is enabled.
+
+```go
+// Default behavior: empty cookies are filtered
+jar := tls_client.NewCookieJar()
+
+u, _ := url.Parse("https://example.com")
+jar.SetCookies(u, []*http.Cookie{
+    {Name: "valid", Value: "data"},
+    {Name: "empty", Value: ""},  // Filtered out
+})
+```
+
+### Expired cookie filtering
+
+Cookies with `MaxAge < 0` are automatically filtered from requests.
+
+```go
+jar := tls_client.NewCookieJar()
+
+u, _ := url.Parse("https://example.com")
+jar.SetCookies(u, []*http.Cookie{
+    {Name: "active", Value: "data", MaxAge: 3600},
+    {Name: "deleted", Value: "old", MaxAge: -1},  // Will be excluded from requests
+})
+
+// When making a request, only "active" cookie will be sent
+cookies := jar.Cookies(u)  // Only returns non-expired cookies
+```
+
+### Cookie deduplication
+
+When multiple cookies have the same name, only the last one is kept:
+
+```go
+jar := tls_client.NewCookieJar()
+
+u, _ := url.Parse("https://example.com")
+jar.SetCookies(u, []*http.Cookie{
+    {Name: "session", Value: "first"},
+    {Name: "session", Value: "second"},  // This one wins
+})
+```
+
+## Related
+
+- [Cookie management guide](/guides/cookie-management) - Practical guide to working with cookies
+- [HttpClient.SetCookies()](/api/http-client#setcookies) - Set cookies on the HTTP client
+- [HttpClient.GetCookies()](/api/http-client#getcookies) - Get cookies from the HTTP client
+- [WithCookieJar()](/api/client-options#withcookiejar) - Configure client with a cookie jar
