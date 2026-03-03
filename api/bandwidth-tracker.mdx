@@ -1,0 +1,354 @@
+---
+title: BandwidthTracker
+description: Monitor network bandwidth usage for requests and responses
+---
+
+## Overview
+
+The `BandwidthTracker` interface provides methods to monitor network bandwidth consumption across all HTTP requests made by the client. It tracks both read (download) and write (upload) operations at the connection level.
+
+## Interface definition
+
+```go
+type BandwidthTracker interface {
+    Reset()
+    GetTotalBandwidth() int64
+    GetWriteBytes() int64
+    GetReadBytes() int64
+    TrackConnection(ctx context.Context, conn net.Conn) net.Conn
+}
+```
+
+## Methods
+
+<ParamField path="Reset" type="func()">
+  Resets all bandwidth counters to zero.
+  
+  **Use case**: Resetting metrics between test runs or at specific intervals.
+</ParamField>
+
+<ParamField path="GetTotalBandwidth" type="func() int64">
+  Returns the total bandwidth used (read + write) in bytes.
+  
+  **Returns**: The sum of all bytes read and written.
+</ParamField>
+
+<ParamField path="GetWriteBytes" type="func() int64">
+  Returns the total number of bytes written (uploaded) to the network.
+  
+  **Returns**: Upload bandwidth in bytes.
+</ParamField>
+
+<ParamField path="GetReadBytes" type="func() int64">
+  Returns the total number of bytes read (downloaded) from the network.
+  
+  **Returns**: Download bandwidth in bytes.
+</ParamField>
+
+<ParamField path="TrackConnection" type="func(ctx context.Context, conn net.Conn) net.Conn">
+  Wraps a network connection to track bandwidth usage. This is typically used internally by the client.
+  
+  **Parameters**:
+  - `ctx`: The context for the connection
+  - `conn`: The network connection to track
+  
+  **Returns**: A wrapped connection that tracks read/write operations.
+</ParamField>
+
+## Enabling bandwidth tracking
+
+Bandwidth tracking is disabled by default. Enable it using the `WithBandwidthTracker()` option:
+
+```go
+client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+    tls_client.WithBandwidthTracker(),
+)
+```
+
+## Usage examples
+
+### Basic bandwidth monitoring
+
+Track bandwidth consumption for a series of requests:
+
+```go
+package main
+
+import (
+    "fmt"
+    "io"
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+func main() {
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+        tls_client.WithBandwidthTracker(),
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    // Make a request
+    resp, err := client.Get("https://example.com")
+    if err != nil {
+        panic(err)
+    }
+    defer resp.Body.Close()
+
+    // Read the response body
+    _, err = io.ReadAll(resp.Body)
+    if err != nil {
+        panic(err)
+    }
+
+    // Get bandwidth metrics
+    tracker := client.GetBandwidthTracker()
+    
+    fmt.Printf("Bytes sent: %d\n", tracker.GetWriteBytes())
+    fmt.Printf("Bytes received: %d\n", tracker.GetReadBytes())
+    fmt.Printf("Total bandwidth: %d\n", tracker.GetTotalBandwidth())
+}
+```
+
+### Monitoring multiple requests
+
+Track cumulative bandwidth across multiple requests:
+
+```go
+package main
+
+import (
+    "fmt"
+    "io"
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+func main() {
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+        tls_client.WithBandwidthTracker(),
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    tracker := client.GetBandwidthTracker()
+    urls := []string{
+        "https://example.com/page1",
+        "https://example.com/page2",
+        "https://example.com/page3",
+    }
+
+    for _, url := range urls {
+        resp, err := client.Get(url)
+        if err != nil {
+            fmt.Printf("Error fetching %s: %v\n", url, err)
+            continue
+        }
+        
+        io.ReadAll(resp.Body)
+        resp.Body.Close()
+
+        fmt.Printf("After %s - Total: %d bytes\n", url, tracker.GetTotalBandwidth())
+    }
+
+    fmt.Printf("\nFinal statistics:\n")
+    fmt.Printf("Total uploaded: %d bytes (%.2f KB)\n", 
+        tracker.GetWriteBytes(), 
+        float64(tracker.GetWriteBytes())/1024)
+    fmt.Printf("Total downloaded: %d bytes (%.2f KB)\n", 
+        tracker.GetReadBytes(), 
+        float64(tracker.GetReadBytes())/1024)
+}
+```
+
+### Periodic bandwidth reporting
+
+Reset and monitor bandwidth in intervals:
+
+```go
+package main
+
+import (
+    "fmt"
+    "io"
+    "time"
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+func main() {
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+        tls_client.WithBandwidthTracker(),
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    tracker := client.GetBandwidthTracker()
+
+    // Report bandwidth every 10 seconds
+    ticker := time.NewTicker(10 * time.Second)
+    defer ticker.Stop()
+
+    go func() {
+        for range ticker.C {
+            upload := tracker.GetWriteBytes()
+            download := tracker.GetReadBytes()
+            
+            fmt.Printf("[%s] Upload: %d bytes, Download: %d bytes\n",
+                time.Now().Format("15:04:05"),
+                upload,
+                download,
+            )
+            
+            // Reset for next interval
+            tracker.Reset()
+        }
+    }()
+
+    // Make requests...
+    for i := 0; i < 5; i++ {
+        resp, err := client.Get("https://example.com")
+        if err == nil {
+            io.ReadAll(resp.Body)
+            resp.Body.Close()
+        }
+        time.Sleep(3 * time.Second)
+    }
+
+    time.Sleep(15 * time.Second) // Wait for final report
+}
+```
+
+### Rate limiting based on bandwidth
+
+Implement simple bandwidth-based throttling:
+
+```go
+package main
+
+import (
+    "fmt"
+    "io"
+    "time"
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+const maxBytesPerSecond = 1024 * 1024 // 1 MB/s limit
+
+func main() {
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+        tls_client.WithBandwidthTracker(),
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    tracker := client.GetBandwidthTracker()
+    urls := []string{
+        "https://example.com/file1",
+        "https://example.com/file2",
+        "https://example.com/file3",
+    }
+
+    startTime := time.Now()
+
+    for _, url := range urls {
+        // Check if we've exceeded rate limit
+        elapsed := time.Since(startTime).Seconds()
+        if elapsed > 0 {
+            currentRate := float64(tracker.GetTotalBandwidth()) / elapsed
+            
+            if currentRate > maxBytesPerSecond {
+                // Calculate sleep duration to stay within limit
+                sleepTime := time.Duration((float64(tracker.GetTotalBandwidth())/maxBytesPerSecond - elapsed)) * time.Second
+                fmt.Printf("Rate limit exceeded, sleeping for %v\n", sleepTime)
+                time.Sleep(sleepTime)
+            }
+        }
+
+        resp, err := client.Get(url)
+        if err != nil {
+            continue
+        }
+        
+        io.ReadAll(resp.Body)
+        resp.Body.Close()
+    }
+
+    fmt.Printf("Downloaded %d bytes in %.2f seconds\n",
+        tracker.GetReadBytes(),
+        time.Since(startTime).Seconds(),
+    )
+}
+```
+
+### Bandwidth logging hook
+
+Combine bandwidth tracking with post-response hooks:
+
+```go
+package main
+
+import (
+    "fmt"
+    "io"
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+func main() {
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+        tls_client.WithBandwidthTracker(),
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    tracker := client.GetBandwidthTracker()
+    var lastTotal int64 = 0
+
+    // Add hook to log bandwidth per request
+    client.AddPostResponseHook(func(ctx *tls_client.PostResponseContext) error {
+        currentTotal := tracker.GetTotalBandwidth()
+        requestBandwidth := currentTotal - lastTotal
+        lastTotal = currentTotal
+
+        if ctx.Error == nil {
+            fmt.Printf("Request to %s used %d bytes\n",
+                ctx.Request.URL.String(),
+                requestBandwidth,
+            )
+        }
+        return nil
+    })
+
+    // Make requests
+    urls := []string{
+        "https://example.com/page1",
+        "https://example.com/page2",
+    }
+
+    for _, url := range urls {
+        resp, err := client.Get(url)
+        if err == nil {
+            io.ReadAll(resp.Body)
+            resp.Body.Close()
+        }
+    }
+}
+```
+
+## Implementation details
+
+The bandwidth tracker:
+
+- Uses atomic operations for thread-safe counter updates
+- Tracks bandwidth at the TCP connection level, including all HTTP overhead (headers, protocol data)
+- Wraps `net.Conn` to intercept `Read()` and `Write()` calls
+- Has minimal performance impact due to atomic integer operations
+- When disabled, uses a no-op implementation with zero overhead
+
+## Related options
+
+- Use [`WithBandwidthTracker()`](/api/client-options#withbandwidthtracker) to enable bandwidth tracking
+- See [`HttpClient.GetBandwidthTracker()`](/api/http-client#getbandwidthtracker) to retrieve the tracker instance
+- Combine with [hooks](/api/hooks) for per-request bandwidth monitoring

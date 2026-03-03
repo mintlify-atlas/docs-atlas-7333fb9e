@@ -1,0 +1,228 @@
+---
+title: Available profiles
+description: Complete list of browser fingerprint profiles
+---
+
+The TLS Client library includes 80+ pre-configured browser profiles. Each profile mimics a specific browser version with accurate TLS and HTTP/2 fingerprints.
+
+## Chrome profiles
+
+Chrome profiles include both standard and PSK (Pre-Shared Key) variants. PSK variants support session resumption.
+
+| Profile Name | Map Key | Version | Notes |
+|--------------|---------|---------|-------|
+| `Chrome_103` | `chrome_103` | 103 | |
+| `Chrome_104` | `chrome_104` | 104 | |
+| `Chrome_105` | `chrome_105` | 105 | |
+| `Chrome_106` | `chrome_106` | 106 | |
+| `Chrome_107` | `chrome_107` | 107 | |
+| `Chrome_108` | `chrome_108` | 108 | |
+| `Chrome_109` | `chrome_109` | 109 | |
+| `Chrome_110` | `chrome_110` | 110 | |
+| `Chrome_111` | `chrome_111` | 111 | |
+| `Chrome_112` | `chrome_112` | 112 | |
+| `Chrome_116_PSK` | `chrome_116_PSK` | 116 | PSK variant |
+| `Chrome_116_PSK_PQ` | `chrome_116_PSK_PQ` | 116 | PSK with post-quantum |
+| `Chrome_117` | `chrome_117` | 117 | |
+| `Chrome_120` | `chrome_120` | 120 | |
+| `Chrome_124` | `chrome_124` | 124 | |
+| `Chrome_130_PSK` | `chrome_130_PSK` | 130 | PSK variant |
+| `Chrome_131` | `chrome_131` | 131 | |
+| `Chrome_131_PSK` | `chrome_131_PSK` | 131 | PSK variant |
+| `Chrome_133` | `chrome_133` | 133 | **Default profile** |
+| `Chrome_133_PSK` | `chrome_133_PSK` | 133 | PSK variant |
+| `Chrome_144` | `chrome_144` | 144 | With HTTP/3 |
+| `Chrome_144_PSK` | `chrome_144_PSK` | 144 | PSK with HTTP/3 |
+| `Chrome_146` | `chrome_146` | 146 | Latest |
+| `Chrome_146_PSK` | `chrome_146_PSK` | 146 | PSK variant |
+
+## Firefox profiles
+
+Firefox profiles include standard and PSK variants for recent versions.
+
+| Profile Name | Map Key | Version | Notes |
+|--------------|---------|---------|-------|
+| `Firefox_102` | `firefox_102` | 102 | |
+| `Firefox_104` | `firefox_104` | 104 | |
+| `Firefox_105` | `firefox_105` | 105 | |
+| `Firefox_106` | `firefox_106` | 106 | |
+| `Firefox_108` | `firefox_108` | 108 | |
+| `Firefox_110` | `firefox_110` | 110 | |
+| `Firefox_117` | `firefox_117` | 117 | |
+| `Firefox_120` | `firefox_120` | 120 | |
+| `Firefox_123` | `firefox_123` | 123 | |
+| `Firefox_132` | `firefox_132` | 132 | |
+| `Firefox_133` | `firefox_133` | 133 | |
+| `Firefox_135` | `firefox_135` | 135 | |
+| `Firefox_146_PSK` | `firefox_146_PSK` | 146 | PSK variant |
+| `Firefox_147` | `firefox_147` | 147 | Latest |
+| `Firefox_147_PSK` | `firefox_147_PSK` | 147 | PSK variant |
+
+## Safari profiles
+
+### Desktop Safari
+
+| Profile Name | Map Key | Version | Platform |
+|--------------|---------|---------|----------|
+| `Safari_15_6_1` | `safari_15_6_1` | 15.6.1 | macOS |
+| `Safari_16_0` | `safari_16_0` | 16.0 | macOS |
+
+### iPad Safari
+
+| Profile Name | Map Key | Version | Platform |
+|--------------|---------|---------|----------|
+| `Safari_Ipad_15_6` | `safari_ipad_15_6` | 15.6 | iPadOS |
+
+### iOS Safari
+
+| Profile Name | Map Key | Version | Platform |
+|--------------|---------|---------|----------|
+| `Safari_IOS_15_5` | `safari_ios_15_5` | 15.5 | iOS |
+| `Safari_IOS_15_6` | `safari_ios_15_6` | 15.6 | iOS |
+| `Safari_IOS_16_0` | `safari_ios_16_0` | 16.0 | iOS |
+| `Safari_IOS_17_0` | `safari_ios_17_0` | 17.0 | iOS |
+| `Safari_IOS_18_0` | `safari_ios_18_0` | 18.0 | iOS |
+| `Safari_IOS_18_5` | `safari_ios_18_5` | 18.5 | iOS |
+| `Safari_IOS_26_0` | `safari_ios_26_0` | 26.0 | iOS |
+
+## Opera profiles
+
+| Profile Name | Map Key | Version |
+|--------------|---------|----------|
+| `Opera_89` | `opera_89` | 89 |
+| `Opera_90` | `opera_90` | 90 |
+| `Opera_91` | `opera_91` | 91 |
+
+## Mobile app profiles
+
+These profiles mimic popular mobile applications.
+
+### Zalando
+
+| Profile Name | Map Key | Platform |
+|--------------|---------|----------|
+| `ZalandoAndroidMobile` | `zalando_android_mobile` | Android |
+| `ZalandoIosMobile` | `zalando_ios_mobile` | iOS |
+
+### Nike
+
+| Profile Name | Map Key | Platform |
+|--------------|---------|----------|
+| `NikeAndroidMobile` | `nike_android_mobile` | Android |
+| `NikeIosMobile` | `nike_ios_mobile` | iOS |
+
+### MMS (iOS)
+
+| Profile Name | Map Key | Variant |
+|--------------|---------|----------|
+| `MMSIos` | `mms_ios`, `mms_ios_1` | Variant 1 |
+| `MMSIos2` | `mms_ios_2` | Variant 2 |
+| `MMSIos3` | `mms_ios_3` | Variant 3 |
+
+### Mesh
+
+| Profile Name | Map Key | Platform/Variant |
+|--------------|---------|------------------|
+| `MeshIos` | `mesh_ios`, `mesh_ios_1` | iOS variant 1 |
+| `MeshIos2` | `mesh_ios_2` | iOS variant 2 |
+| `MeshAndroid` | `mesh_android`, `mesh_android_1` | Android variant 1 |
+| `MeshAndroid2` | `mesh_android_2` | Android variant 2 |
+
+### Confirmed VPN
+
+| Profile Name | Map Key | Platform |
+|--------------|---------|----------|
+| `ConfirmedIos` | `confirmed_ios` | iOS |
+| `ConfirmedAndroid` | `confirmed_android` | Android |
+
+## OkHttp4 profiles
+
+Profiles for the OkHttp4 library on different Android versions.
+
+| Profile Name | Map Key | Android Version |
+|--------------|---------|------------------|
+| `Okhttp4Android7` | `okhttp4_android_7` | Android 7 |
+| `Okhttp4Android8` | `okhttp4_android_8` | Android 8 |
+| `Okhttp4Android9` | `okhttp4_android_9` | Android 9 |
+| `Okhttp4Android10` | `okhttp4_android_10` | Android 10 |
+| `Okhttp4Android11` | `okhttp4_android_11` | Android 11 |
+| `Okhttp4Android12` | `okhttp4_android_12` | Android 12 |
+| `Okhttp4Android13` | `okhttp4_android_13` | Android 13 |
+
+## Custom profiles
+
+### CloudflareCustom
+
+| Profile Name | Map Key | Description |
+|--------------|---------|-------------|
+| `CloudflareCustom` | `cloudscraper` | Optimized for Cloudflare |
+
+## Usage examples
+
+### Using a profile by constant
+
+```go
+import "github.com/bogdanfinn/tls-client/profiles"
+
+client, err := tlsclient.NewHttpClient(
+    tlsclient.NewNoopLogger(),
+    tlsclient.WithClientProfile(profiles.Chrome_146),
+)
+```
+
+### Using a profile by map key
+
+```go
+profile := profiles.MappedTLSClients["firefox_147"]
+client, err := tlsclient.NewHttpClient(
+    tlsclient.NewNoopLogger(),
+    tlsclient.WithClientProfile(profile),
+)
+```
+
+### Listing all available profiles
+
+```go
+for key, profile := range profiles.MappedTLSClients {
+    fmt.Printf("%s: %s\n", key, profile.GetClientHelloStr())
+}
+```
+
+## Choosing a profile
+
+### For general web scraping
+Use the latest Chrome or Firefox profile:
+- `Chrome_146` or `Chrome_146_PSK`
+- `Firefox_147` or `Firefox_147_PSK`
+
+### For mobile targets
+Use Safari iOS profiles:
+- `Safari_IOS_18_5` for recent iOS
+- `Safari_IOS_26_0` for latest
+
+### For Cloudflare protection
+Use:
+- `CloudflareCustom` (specialized profile)
+- Latest Chrome PSK variant for general cases
+
+### For session resumption
+Use PSK (Pre-Shared Key) variants:
+- `Chrome_146_PSK`
+- `Firefox_147_PSK`
+- `Chrome_131_PSK`
+
+## Profile compatibility
+
+Most profiles support:
+- ✅ HTTP/1.1
+- ✅ HTTP/2
+
+HTTP/3 support (select profiles):
+- ✅ `Chrome_144`, `Chrome_144_PSK`
+- ✅ `Chrome_133`, `Chrome_133_PSK`
+- ✅ `Firefox_147`, `Firefox_147_PSK`
+- ✅ `Firefox_146_PSK`
+
+<Note>
+Profiles are continuously updated. Check the [profiles source code](https://github.com/bogdanfinn/tls-client/tree/master/profiles) for the latest additions.
+</Note>

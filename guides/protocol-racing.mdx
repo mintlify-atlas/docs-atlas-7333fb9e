@@ -1,0 +1,378 @@
+---
+title: Protocol racing
+description: Race HTTP/2 and HTTP/3 connections simultaneously using Chrome's Happy Eyeballs approach
+---
+
+Protocol racing allows the TLS Client to race HTTP/3 (QUIC) and HTTP/2 (TCP) connections simultaneously, using whichever connects first. This implements Chrome's "Happy Eyeballs" approach for optimal performance and reliability.
+
+## What is protocol racing?
+
+Protocol racing starts both HTTP/3 and HTTP/2 connections in parallel:
+
+1. HTTP/3 (QUIC) starts immediately
+2. HTTP/2 (TCP) starts after a 300ms delay (matching Chrome's behavior)
+3. Whichever protocol succeeds first is used for the request
+4. The winning protocol is cached for that host
+5. Subsequent requests use the cached protocol directly
+
+This provides:
+- Faster connections when HTTP/3 is available
+- Automatic fallback to HTTP/2 when HTTP/3 fails
+- Optimal performance without manual configuration
+
+## Enabling protocol racing
+
+Enable protocol racing when creating the client:
+
+```go
+import (
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+)
+
+options := []tls_client.HttpClientOption{
+    tls_client.WithTimeoutSeconds(30),
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithProtocolRacing(),  // Enable racing
+}
+
+client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+if err != nil {
+    log.Fatal(err)
+}
+
+// First request - races HTTP/3 vs HTTP/2
+resp, err := client.Get("https://www.cloudflare.com")
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+
+log.Printf("Protocol used: %s", resp.Proto)  // "HTTP/3.0" or "HTTP/2.0"
+
+// Second request to same host - uses cached winner
+resp2, err := client.Get("https://www.cloudflare.com/about")
+// Uses the same protocol that won the race
+```
+
+<Note>
+Protocol racing implements Chrome's 300ms delay before starting HTTP/2, giving HTTP/3 a head start since it's typically faster.
+</Note>
+
+## How the race works
+
+The racing algorithm follows Chrome's implementation:
+
+```
+Time 0ms:    HTTP/3 connection starts
+Time 300ms:  HTTP/2 connection starts
+Time ???:    First successful connection wins
+```
+
+The 300ms delay allows HTTP/3 to complete if it's fast, while ensuring HTTP/2 starts soon enough to act as a fallback.
+
+## Configuration constraints
+
+Protocol racing has specific requirements:
+
+```go
+// ✅ Valid: Racing with default settings
+tls_client.WithProtocolRacing()
+
+// ❌ Invalid: Cannot race with HTTP/3 disabled
+tls_client.WithProtocolRacing()
+tls_client.WithDisableHttp3()  // Error!
+
+// ❌ Invalid: Cannot race with HTTP/1 forced
+tls_client.WithProtocolRacing()
+tls_client.WithForceHttp1()  // Error!
+```
+
+<Warning>
+The client will return an error if you try to enable racing while also disabling HTTP/3 or forcing HTTP/1.
+</Warning>
+
+## Protocol caching
+
+The racing mechanism caches which protocol won for each host:
+
+```go
+// First request - races
+resp1, err := client.Get("https://example.com")
+// Let's say HTTP/3 wins
+
+// Second request - uses cached HTTP/3
+resp2, err := client.Get("https://example.com/page2")
+// Directly uses HTTP/3, no race
+
+// Different host - races again
+resp3, err := client.Get("https://other-domain.com")
+// New race for this host
+```
+
+### Cache invalidation
+
+If a cached protocol fails, the cache is cleared and a new race occurs:
+
+```go
+// HTTP/3 is cached for example.com
+resp1, err := client.Get("https://example.com")
+
+// HTTP/3 connection fails (network change, server issue, etc.)
+resp2, err := client.Get("https://example.com/page2")
+// Cache is cleared on failure
+
+// Next request races again
+resp3, err := client.Get("https://example.com/page3")
+// New race determines the best protocol
+```
+
+## Complete example
+
+A practical example showing protocol racing in action:
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+    "time"
+
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+)
+
+func main() {
+    options := []tls_client.HttpClientOption{
+        tls_client.WithTimeoutSeconds(30),
+        tls_client.WithClientProfile(profiles.Chrome_133),
+        tls_client.WithProtocolRacing(),
+    }
+    
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Test multiple sites
+    sites := []string{
+        "https://www.cloudflare.com",
+        "https://www.google.com",
+        "https://www.facebook.com",
+    }
+
+    for _, site := range sites {
+        fmt.Printf("\nTesting %s:\n", site)
+        
+        // First request - races
+        start := time.Now()
+        resp, err := client.Get(site)
+        duration := time.Since(start)
+        
+        if err != nil {
+            log.Printf("  Error: %v\n", err)
+            continue
+        }
+        resp.Body.Close()
+        
+        fmt.Printf("  First request: %s in %v\n", resp.Proto, duration)
+        
+        // Second request - uses cached protocol
+        start = time.Now()
+        resp2, err := client.Get(site)
+        duration2 := time.Since(start)
+        
+        if err != nil {
+            log.Printf("  Error: %v\n", err)
+            continue
+        }
+        resp2.Body.Close()
+        
+        fmt.Printf("  Second request: %s in %v (cached)\n", resp2.Proto, duration2)
+        fmt.Printf("  Speed improvement: %.2fx faster\n", 
+            float64(duration)/float64(duration2))
+    }
+}
+```
+
+Output example:
+```
+Testing https://www.cloudflare.com:
+  First request: HTTP/3.0 in 445ms
+  Second request: HTTP/3.0 in 178ms (cached)
+  Speed improvement: 2.50x faster
+
+Testing https://www.google.com:
+  First request: HTTP/3.0 in 523ms
+  Second request: HTTP/3.0 in 195ms (cached)
+  Speed improvement: 2.68x faster
+```
+
+## Benefits of protocol racing
+
+### Performance
+
+- Uses the fastest available protocol automatically
+- No manual configuration required
+- Adapts to network conditions
+
+### Reliability
+
+- Automatic fallback if HTTP/3 fails
+- Continues working when networks block QUIC
+- Recovers from temporary failures
+
+### Compatibility
+
+- Matches real Chrome browser behavior
+- Reduces fingerprinting risk
+- Works with any server configuration
+
+## When to use protocol racing
+
+<Steps>
+
+### Use protocol racing when:
+
+- You want optimal performance without manual tuning
+- You need to mimic Chrome's exact connection behavior
+- Your target servers support HTTP/3
+- Network conditions vary (mobile, different ISPs, etc.)
+
+### Don't use protocol racing when:
+
+- You need WebSocket connections (use `WithForceHttp1()` instead)
+- You know the server doesn't support HTTP/3 (use defaults)
+- You're testing specific protocol behavior
+- You need deterministic protocol selection
+
+</Steps>
+
+## Comparison with other options
+
+```go
+// Default: HTTP/2 preferred, HTTP/3 if negotiated
+client1, _ := tls_client.NewHttpClient(
+    tls_client.NewNoopLogger(),
+    tls_client.WithClientProfile(profiles.Chrome_133),
+)
+
+// Force HTTP/1.1: No protocol negotiation
+client2, _ := tls_client.NewHttpClient(
+    tls_client.NewNoopLogger(),
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithForceHttp1(),
+)
+
+// Disable HTTP/3: Only HTTP/2 or HTTP/1.1
+client3, _ := tls_client.NewHttpClient(
+    tls_client.NewNoopLogger(),
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithDisableHttp3(),
+)
+
+// Protocol racing: Race HTTP/3 vs HTTP/2
+client4, _ := tls_client.NewHttpClient(
+    tls_client.NewNoopLogger(),
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithProtocolRacing(),
+)
+```
+
+## Monitoring protocol usage
+
+Track which protocols are being used:
+
+```go
+import http "github.com/bogdanfinn/fhttp"
+
+options := []tls_client.HttpClientOption{
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithProtocolRacing(),
+    tls_client.WithPostHook(func(ctx *tls_client.PostResponseContext) error {
+        if ctx.Response != nil {
+            log.Printf("URL: %s, Protocol: %s, Status: %d",
+                ctx.Request.URL.Host,
+                ctx.Response.Proto,
+                ctx.Response.StatusCode,
+            )
+        }
+        return nil
+    }),
+}
+
+client, _ := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+```
+
+See the [request hooks guide](/guides/request-hooks) for more monitoring options.
+
+## Troubleshooting
+
+### Racing timeout
+
+If both protocols fail to connect within the timeout:
+
+```go
+// Increase timeout for racing
+tls_client.WithTimeoutSeconds(60)  // Give more time for racing
+```
+
+### HTTP/3 always fails
+
+Some networks block UDP traffic required for HTTP/3:
+
+```go
+// Disable HTTP/3 if it never works
+tls_client.WithDisableHttp3()
+```
+
+### Inconsistent performance
+
+If you see high variance in response times, protocol racing is likely working correctly by adapting to conditions.
+
+## Best practices
+
+<Steps>
+
+### Use with modern profiles
+
+Protocol racing requires HTTP/3 support, so use recent browser profiles:
+
+```go
+tls_client.WithClientProfile(profiles.Chrome_133)  // ✅ Good
+tls_client.WithClientProfile(profiles.Chrome_107)  // ⚠️ Older
+```
+
+### Combine with bandwidth tracking
+
+Monitor how much data each protocol uses:
+
+```go
+tls_client.WithProtocolRacing()
+tls_client.WithBandwidthTracker()
+```
+
+### Test on target infrastructure
+
+Verify protocol racing behavior on your target servers before deployment.
+
+### Allow sufficient timeout
+
+Protocol racing needs time to try both protocols:
+
+```go
+tls_client.WithTimeoutSeconds(30)  // Minimum recommended
+```
+
+</Steps>
+
+<Tip>
+Protocol racing is most beneficial for first-time connections to a host. Once the winning protocol is cached, subsequent requests are fast.
+</Tip>
+
+## Next steps
+
+- Learn about [client options](/guides/client-options) for protocol configuration
+- Enable [bandwidth tracking](/guides/bandwidth-tracking) to monitor protocol efficiency
+- Use [request hooks](/guides/request-hooks) to log protocol selection

@@ -1,0 +1,589 @@
+---
+title: Request hooks
+description: Use pre-request and post-response hooks to intercept, modify, and monitor HTTP requests
+---
+
+Request hooks allow you to intercept HTTP requests before they're sent and after responses are received. This is useful for logging, authentication, error handling, and request modification.
+
+## Hook types
+
+The TLS Client supports two types of hooks:
+
+- **Pre-request hooks**: Execute before the request is sent
+- **Post-response hooks**: Execute after the response is received
+
+## Pre-request hooks
+
+Pre-request hooks run before each request is sent. They can modify the request or abort it entirely.
+
+### Basic pre-request hook
+
+```go
+import (
+    http "github.com/bogdanfinn/fhttp"
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+)
+
+preHook := func(req *http.Request) error {
+    // Add a custom header to every request
+    req.Header.Set("X-Custom-Header", "my-value")
+    
+    // Log the request
+    log.Printf("Making request to: %s", req.URL)
+    
+    return nil
+}
+
+options := []tls_client.HttpClientOption{
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithPreHook(preHook),
+}
+
+client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+```
+
+### Aborting requests
+
+Return an error to abort the request:
+
+```go
+preHook := func(req *http.Request) error {
+    // Block requests to certain domains
+    if req.URL.Host == "blocked.example.com" {
+        return fmt.Errorf("requests to %s are blocked", req.URL.Host)
+    }
+    
+    return nil
+}
+
+tls_client.WithPreHook(preHook)
+```
+
+When a hook returns an error:
+- The request is aborted
+- Subsequent hooks are not executed
+- The error is returned to the caller
+- Post-response hooks are **not** executed
+
+## Post-response hooks
+
+Post-response hooks run after the response is received. They can inspect the response and request metadata.
+
+### Basic post-response hook
+
+```go
+postHook := func(ctx *tls_client.PostResponseContext) error {
+    // Log the response
+    log.Printf("Response from %s: %d",
+        ctx.Request.URL.Host,
+        ctx.Response.StatusCode,
+    )
+    
+    return nil
+}
+
+tls_client.WithPostHook(postHook)
+```
+
+### Post-response context
+
+The `PostResponseContext` contains:
+
+```go
+type PostResponseContext struct {
+    Request  *http.Request   // The original request
+    Response *http.Response  // The response (nil if request failed)
+    Error    error           // Non-nil if the request failed
+}
+```
+
+### Handling failed requests
+
+```go
+postHook := func(ctx *tls_client.PostResponseContext) error {
+    if ctx.Error != nil {
+        log.Printf("Request to %s failed: %v",
+            ctx.Request.URL.Host,
+            ctx.Error,
+        )
+        return nil
+    }
+    
+    log.Printf("Request to %s succeeded: %d",
+        ctx.Request.URL.Host,
+        ctx.Response.StatusCode,
+    )
+    
+    return nil
+}
+```
+
+## Multiple hooks
+
+You can register multiple hooks, which execute in the order they were added:
+
+```go
+// Pre-request hooks
+hook1 := func(req *http.Request) error {
+    log.Println("Hook 1")
+    return nil
+}
+
+hook2 := func(req *http.Request) error {
+    log.Println("Hook 2")
+    return nil
+}
+
+hook3 := func(req *http.Request) error {
+    log.Println("Hook 3")
+    return nil
+}
+
+options := []tls_client.HttpClientOption{
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithPreHook(hook1),  // Executes first
+    tls_client.WithPreHook(hook2),  // Executes second
+    tls_client.WithPreHook(hook3),  // Executes third
+}
+
+client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+
+// Output when making a request:
+// Hook 1
+// Hook 2
+// Hook 3
+```
+
+<Note>
+If any pre-request hook returns an error, subsequent hooks are not executed and the request is aborted.
+</Note>
+
+## Runtime hook registration
+
+Add hooks after creating the client:
+
+```go
+client, err := tls_client.NewHttpClient(
+    tls_client.NewNoopLogger(),
+    tls_client.WithClientProfile(profiles.Chrome_133),
+)
+
+// Add pre-request hook at runtime
+client.AddPreRequestHook(func(req *http.Request) error {
+    log.Printf("Runtime hook: %s", req.URL)
+    return nil
+})
+
+// Add post-response hook at runtime
+client.AddPostResponseHook(func(ctx *tls_client.PostResponseContext) error {
+    log.Printf("Runtime post-hook: %d", ctx.Response.StatusCode)
+    return nil
+})
+```
+
+Runtime hooks are executed **after** hooks registered during client creation.
+
+## Continuing after errors
+
+Use `ErrContinueHooks` to log an error but continue executing subsequent hooks:
+
+```go
+import "fmt"
+
+hook1 := func(req *http.Request) error {
+    log.Println("Hook 1")
+    return nil
+}
+
+hook2 := func(req *http.Request) error {
+    // This hook has an error but wants to continue
+    err := fmt.Errorf("something went wrong: %w", tls_client.ErrContinueHooks)
+    return err
+}
+
+hook3 := func(req *http.Request) error {
+    log.Println("Hook 3 still executes")
+    return nil
+}
+
+options := []tls_client.HttpClientOption{
+    tls_client.WithPreHook(hook1),
+    tls_client.WithPreHook(hook2),  // Logs error but continues
+    tls_client.WithPreHook(hook3),  // Still executes
+}
+
+// Output:
+// Hook 1
+// [Warning] pre-request hook error (continuing): something went wrong
+// Hook 3 still executes
+```
+
+Without `ErrContinueHooks`, hook3 would not execute.
+
+## Complete examples
+
+### Authentication hook
+
+Add authentication tokens to all requests:
+
+```go
+var authToken string = "secret-token-123"
+
+authHook := func(req *http.Request) error {
+    // Add auth header to all requests
+    req.Header.Set("Authorization", "Bearer "+authToken)
+    
+    // Add API key for specific domains
+    if req.URL.Host == "api.example.com" {
+        req.Header.Set("X-API-Key", "api-key-456")
+    }
+    
+    return nil
+}
+
+tls_client.WithPreHook(authHook)
+```
+
+### Request logging hook
+
+Log all requests and responses with timing:
+
+```go
+import "time"
+
+var requestTimes sync.Map
+
+preHook := func(req *http.Request) error {
+    // Store request start time
+    requestTimes.Store(req, time.Now())
+    
+    log.Printf("[REQUEST] %s %s", req.Method, req.URL)
+    return nil
+}
+
+postHook := func(ctx *tls_client.PostResponseContext) error {
+    // Calculate duration
+    if startTime, ok := requestTimes.Load(ctx.Request); ok {
+        duration := time.Since(startTime.(time.Time))
+        requestTimes.Delete(ctx.Request)
+        
+        if ctx.Error != nil {
+            log.Printf("[RESPONSE] %s %s - ERROR: %v (took %v)",
+                ctx.Request.Method,
+                ctx.Request.URL,
+                ctx.Error,
+                duration,
+            )
+        } else {
+            log.Printf("[RESPONSE] %s %s - %d (took %v)",
+                ctx.Request.Method,
+                ctx.Request.URL,
+                ctx.Response.StatusCode,
+                duration,
+            )
+        }
+    }
+    
+    return nil
+}
+
+options := []tls_client.HttpClientOption{
+    tls_client.WithPreHook(preHook),
+    tls_client.WithPostHook(postHook),
+}
+```
+
+### Rate limiting hook
+
+Implement simple rate limiting:
+
+```go
+import (
+    "sync"
+    "time"
+)
+
+type RateLimiter struct {
+    requests []time.Time
+    limit    int
+    window   time.Duration
+    mu       sync.Mutex
+}
+
+func (rl *RateLimiter) Allow() error {
+    rl.mu.Lock()
+    defer rl.mu.Unlock()
+    
+    now := time.Now()
+    
+    // Remove old requests outside the time window
+    cutoff := now.Add(-rl.window)
+    newRequests := []time.Time{}
+    for _, t := range rl.requests {
+        if t.After(cutoff) {
+            newRequests = append(newRequests, t)
+        }
+    }
+    rl.requests = newRequests
+    
+    // Check if we're at the limit
+    if len(rl.requests) >= rl.limit {
+        return fmt.Errorf("rate limit exceeded: %d requests per %v",
+            rl.limit, rl.window)
+    }
+    
+    // Add this request
+    rl.requests = append(rl.requests, now)
+    return nil
+}
+
+// Create rate limiter: 10 requests per second
+limiter := &RateLimiter{
+    limit:  10,
+    window: time.Second,
+}
+
+rateLimitHook := func(req *http.Request) error {
+    return limiter.Allow()
+}
+
+tls_client.WithPreHook(rateLimitHook)
+```
+
+### Retry with exponential backoff
+
+Implement automatic retries in a post-response hook:
+
+```go
+const maxRetries = 3
+
+retryHook := func(ctx *tls_client.PostResponseContext) error {
+    // Only retry on 5xx errors or network errors
+    shouldRetry := false
+    
+    if ctx.Error != nil {
+        shouldRetry = true
+    } else if ctx.Response.StatusCode >= 500 {
+        shouldRetry = true
+    }
+    
+    if !shouldRetry {
+        return nil
+    }
+    
+    // Get retry count from context (custom implementation needed)
+    retryCount := getRetryCount(ctx.Request)
+    if retryCount >= maxRetries {
+        return nil
+    }
+    
+    // Exponential backoff: 1s, 2s, 4s
+    backoff := time.Duration(1<<retryCount) * time.Second
+    log.Printf("Retrying after %v (attempt %d/%d)",
+        backoff, retryCount+1, maxRetries)
+    
+    time.Sleep(backoff)
+    
+    // Make retry request (custom implementation needed)
+    // setRetryCount(ctx.Request, retryCount+1)
+    
+    return nil
+}
+
+tls_client.WithPostHook(retryHook)
+```
+
+### Metrics collection hook
+
+Collect request metrics:
+
+```go
+import "sync/atomic"
+
+type Metrics struct {
+    TotalRequests   int64
+    SuccessRequests int64
+    FailedRequests  int64
+    TotalBytes      int64
+}
+
+var metrics Metrics
+
+preHook := func(req *http.Request) error {
+    atomic.AddInt64(&metrics.TotalRequests, 1)
+    return nil
+}
+
+postHook := func(ctx *tls_client.PostResponseContext) error {
+    if ctx.Error != nil {
+        atomic.AddInt64(&metrics.FailedRequests, 1)
+    } else {
+        atomic.AddInt64(&metrics.SuccessRequests, 1)
+        
+        // Track response size
+        if ctx.Response.ContentLength > 0 {
+            atomic.AddInt64(&metrics.TotalBytes, ctx.Response.ContentLength)
+        }
+    }
+    
+    return nil
+}
+
+options := []tls_client.HttpClientOption{
+    tls_client.WithPreHook(preHook),
+    tls_client.WithPostHook(postHook),
+}
+
+// Later: print metrics
+log.Printf("Metrics: %d total, %d success, %d failed, %d bytes",
+    metrics.TotalRequests,
+    metrics.SuccessRequests,
+    metrics.FailedRequests,
+    metrics.TotalBytes,
+)
+```
+
+## Resetting hooks
+
+Remove all hooks registered at runtime:
+
+```go
+// Remove all pre-request hooks
+client.ResetPreHooks()
+
+// Remove all post-response hooks
+client.ResetPostHooks()
+```
+
+<Warning>
+`ResetPreHooks()` and `ResetPostHooks()` only remove hooks added at runtime with `AddPreRequestHook()` and `AddPostResponseHook()`. Hooks registered during client creation with `WithPreHook()` and `WithPostHook()` are not removed.
+</Warning>
+
+## Thread safety
+
+Hook registration methods are thread-safe:
+
+```go
+var wg sync.WaitGroup
+
+for i := 0; i < 10; i++ {
+    wg.Add(1)
+    go func(id int) {
+        defer wg.Done()
+        
+        client.AddPreRequestHook(func(req *http.Request) error {
+            log.Printf("Hook %d", id)
+            return nil
+        })
+    }(i)
+}
+
+wg.Wait()
+
+// All 10 hooks are safely registered
+```
+
+## Best practices
+
+<Steps>
+
+### Keep hooks fast
+
+Hooks execute synchronously during request processing. Keep them fast to avoid slowing down requests:
+
+```go
+// ✅ Good: Fast operation
+preHook := func(req *http.Request) error {
+    req.Header.Set("X-Request-ID", generateID())
+    return nil
+}
+
+// ❌ Bad: Slow operation
+preHook := func(req *http.Request) error {
+    // Don't do expensive database queries in hooks
+    user := database.QueryUser(req.Header.Get("Auth"))
+    return nil
+}
+```
+
+### Use for cross-cutting concerns
+
+Hooks are ideal for functionality that applies to all requests:
+- Authentication
+- Logging
+- Metrics
+- Rate limiting
+- Request ID generation
+
+### Handle errors gracefully
+
+Always handle errors in hooks:
+
+```go
+postHook := func(ctx *tls_client.PostResponseContext) error {
+    if ctx.Error != nil {
+        // Log but don't fail
+        log.Printf("Request error: %v", ctx.Error)
+        return nil
+    }
+    
+    // Process response
+    return nil
+}
+```
+
+### Don't modify response body
+
+Post-response hooks should not read or modify the response body, as it needs to be available to the caller:
+
+```go
+// ❌ Bad: Don't read body in hooks
+postHook := func(ctx *tls_client.PostResponseContext) error {
+    body, _ := io.ReadAll(ctx.Response.Body)  // Don't do this!
+    return nil
+}
+
+// ✅ Good: Only inspect headers/status
+postHook := func(ctx *tls_client.PostResponseContext) error {
+    log.Printf("Status: %d", ctx.Response.StatusCode)
+    log.Printf("Content-Type: %s", 
+        ctx.Response.Header.Get("Content-Type"))
+    return nil
+}
+```
+
+</Steps>
+
+## Hook execution order
+
+Understanding execution order helps you organize hooks:
+
+1. Pre-request hooks registered with `WithPreHook()` (in registration order)
+2. Pre-request hooks added with `AddPreRequestHook()` (in registration order)
+3. **Request is sent**
+4. Post-response hooks registered with `WithPostHook()` (in registration order)
+5. Post-response hooks added with `AddPostResponseHook()` (in registration order)
+
+Example:
+
+```go
+options := []tls_client.HttpClientOption{
+    tls_client.WithPreHook(hookA),   // Runs 1st
+    tls_client.WithPreHook(hookB),   // Runs 2nd
+    tls_client.WithPostHook(hookC),  // Runs 4th
+}
+
+client, _ := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+
+client.AddPreRequestHook(hookD)     // Runs 3rd
+client.AddPostResponseHook(hookE)   // Runs 5th
+
+// Execution order: A, B, D, [request], C, E
+```
+
+## Next steps
+
+- Use hooks with [bandwidth tracking](/guides/bandwidth-tracking) to monitor data usage
+- Combine with [certificate pinning](/guides/certificate-pinning) to detect security issues
+- Implement custom authentication with [cookie management](/guides/cookie-management)

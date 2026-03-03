@@ -1,0 +1,412 @@
+---
+title: Client options
+description: Configure the TLS Client with various options for profiles, timeouts, debugging, and more
+---
+
+The TLS Client supports a wide range of configuration options that control its behavior. This guide covers all available options and how to use them.
+
+## Basic configuration
+
+Client options are passed when creating a new HTTP client:
+
+```go
+import (
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+)
+
+options := []tls_client.HttpClientOption{
+    tls_client.WithTimeoutSeconds(30),
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithCookieJar(tls_client.NewCookieJar()),
+}
+
+client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+## Client profiles
+
+Client profiles define the TLS fingerprint and HTTP/2 settings that mimic specific browsers.
+
+### Using built-in profiles
+
+```go
+// Chrome profiles
+tls_client.WithClientProfile(profiles.Chrome_133)
+tls_client.WithClientProfile(profiles.Chrome_124)
+tls_client.WithClientProfile(profiles.Chrome_120)
+
+// Firefox profiles
+tls_client.WithClientProfile(profiles.Firefox_133)
+tls_client.WithClientProfile(profiles.Firefox_120)
+
+// Safari profiles
+tls_client.WithClientProfile(profiles.Safari_18_0)
+tls_client.WithClientProfile(profiles.Safari_17_5)
+
+// Other browsers
+tls_client.WithClientProfile(profiles.Opera_114)
+```
+
+<Tip>
+Use the latest Chrome profile for best compatibility with modern websites. Chrome profiles are the most frequently updated.
+</Tip>
+
+### Random TLS extension order
+
+Randomize the order of TLS extensions to avoid detection:
+
+```go
+tls_client.WithRandomTLSExtensionOrder()
+```
+
+<Note>
+GREASE and padding extensions maintain fixed positions even when randomizing extension order.
+</Note>
+
+## Timeout configuration
+
+Control how long the client waits for requests to complete:
+
+```go
+// Timeout in seconds
+tls_client.WithTimeoutSeconds(30)
+
+// Timeout in milliseconds for more precision
+tls_client.WithTimeoutMilliseconds(5000)
+
+// Disable timeout (not recommended for production)
+tls_client.WithTimeoutSeconds(0)
+```
+
+<Warning>
+The timeout includes connection time, redirects, and reading the response body. If the timer expires during an active download, the connection is forcibly closed.
+</Warning>
+
+## Cookie management
+
+Configure how cookies are handled:
+
+```go
+// Create a standard cookie jar
+jar := tls_client.NewCookieJar()
+tls_client.WithCookieJar(jar)
+
+// Cookie jar with options
+jar := tls_client.NewCookieJar(
+    tls_client.WithSkipExisting(), // Don't overwrite existing cookies
+)
+tls_client.WithCookieJar(jar)
+```
+
+You can also set or replace the cookie jar at runtime:
+
+```go
+newJar := tls_client.NewCookieJar()
+client.SetCookieJar(newJar)
+```
+
+See the [cookie management guide](/guides/cookie-management) for more details.
+
+## Redirect handling
+
+Control automatic redirect following:
+
+```go
+// Disable automatic redirects
+tls_client.WithNotFollowRedirects()
+
+// Custom redirect function
+redirectFunc := func(req *http.Request, via []*http.Request) error {
+    // Allow up to 10 redirects
+    if len(via) >= 10 {
+        return fmt.Errorf("too many redirects")
+    }
+    
+    // Block redirects to external domains
+    if req.URL.Host != via[0].URL.Host {
+        return fmt.Errorf("external redirect blocked")
+    }
+    
+    return nil
+}
+
+tls_client.WithCustomRedirectFunc(redirectFunc)
+```
+
+## Protocol configuration
+
+Control which HTTP protocols are used:
+
+```go
+// Force HTTP/1.1 (required for WebSocket)
+tls_client.WithForceHttp1()
+
+// Disable HTTP/3
+tls_client.WithDisableHttp3()
+
+// Enable protocol racing (HTTP/2 vs HTTP/3)
+tls_client.WithProtocolRacing()
+```
+
+<Note>
+Protocol racing uses Chrome's "Happy Eyeballs" approach to race HTTP/3 and HTTP/2 connections. See the [protocol racing guide](/guides/protocol-racing) for details.
+</Note>
+
+## Network configuration
+
+### Proxy configuration
+
+```go
+// HTTP proxy
+tls_client.WithProxyUrl("http://user:pass@proxy.example.com:8080")
+
+// SOCKS5 proxy
+tls_client.WithProxyUrl("socks5://user:pass@proxy.example.com:1080")
+
+// Charles proxy for debugging
+tls_client.WithCharlesProxy("127.0.0.1", "8888")
+```
+
+See the [proxy configuration guide](/guides/proxy-configuration) for more details.
+
+### Local address binding
+
+Bind the client to a specific local network interface:
+
+```go
+import "net"
+
+localAddr := net.TCPAddr{
+    IP:   net.ParseIP("192.168.1.100"),
+    Port: 0, // Random port
+}
+
+tls_client.WithLocalAddr(localAddr)
+```
+
+### IP version control
+
+```go
+// Disable IPv6, use only IPv4
+tls_client.WithDisableIPV6()
+
+// Disable IPv4, use only IPv6
+tls_client.WithDisableIPV4()
+```
+
+<Warning>
+You cannot disable both IPv4 and IPv6. The client will return an error if you try.
+</Warning>
+
+## TLS configuration
+
+### Certificate verification
+
+```go
+// Skip TLS certificate verification (insecure)
+tls_client.WithInsecureSkipVerify()
+
+// Overwrite the server name for certificate verification
+tls_client.WithServerNameOverwrite("example.com")
+```
+
+<Warning>
+Only use `WithInsecureSkipVerify()` for testing or when connecting to servers with self-signed certificates. This disables all certificate security checks.
+</Warning>
+
+### Certificate pinning
+
+Pin specific SSL certificates for enhanced security:
+
+```go
+pins := map[string][]string{
+    "api.example.com": {
+        "NQvy9sFS99nBqk/nZCUF44hFhshrkvxqYtfrZq3i+Ww=",
+        "4a6cPehI7OG6cuDZka5NDZ7FR8a60d3auda+sKfg4Ng=",
+    },
+}
+
+badPinHandler := func(req *http.Request) {
+    log.Printf("Bad SSL pin detected for: %s", req.URL.Host)
+}
+
+tls_client.WithCertificatePinning(pins, badPinHandler)
+```
+
+See the [certificate pinning guide](/guides/certificate-pinning) for more details.
+
+## Transport options
+
+Advanced transport configuration:
+
+```go
+import "time"
+
+idleTimeout := 90 * time.Second
+
+transportOpts := &tls_client.TransportOptions{
+    IdleConnTimeout:        &idleTimeout,
+    MaxIdleConns:           100,
+    MaxIdleConnsPerHost:    10,
+    MaxConnsPerHost:        0, // Unlimited
+    MaxResponseHeaderBytes: 4096,
+    WriteBufferSize:        4096,
+    ReadBufferSize:         4096,
+    DisableKeepAlives:      false,
+    DisableCompression:     false,
+}
+
+tls_client.WithTransportOptions(transportOpts)
+```
+
+## Default headers
+
+Set headers that are automatically added to all requests:
+
+```go
+import http "github.com/bogdanfinn/fhttp"
+
+defaultHeaders := http.Header{
+    "User-Agent":      {"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"},
+    "Accept-Language": {"en-US,en;q=0.9"},
+}
+
+tls_client.WithDefaultHeaders(defaultHeaders)
+```
+
+<Note>
+Headers specified on individual requests will override default headers.
+</Note>
+
+## Debugging options
+
+Enable debugging and error handling:
+
+```go
+// Enable debug logging
+tls_client.WithDebug()
+
+// Catch panics to prevent crashes
+tls_client.WithCatchPanics()
+```
+
+When debug mode is enabled, the client logs:
+- Request and response raw bytes
+- Header information
+- Cookie data
+- Body payloads
+- Wire-level traffic details
+
+## Bandwidth tracking
+
+Monitor bandwidth usage for all requests:
+
+```go
+tls_client.WithBandwidthTracker()
+```
+
+After making requests, retrieve bandwidth statistics:
+
+```go
+tracker := client.GetBandwidthTracker()
+
+totalBytes := tracker.GetTotalBandwidth()
+sentBytes := tracker.GetWriteBytes()
+receivedBytes := tracker.GetReadBytes()
+
+log.Printf("Total: %d bytes, Sent: %d bytes, Received: %d bytes",
+    totalBytes, sentBytes, receivedBytes)
+```
+
+See the [bandwidth tracking guide](/guides/bandwidth-tracking) for more details.
+
+## Request hooks
+
+Add pre-request and post-response hooks:
+
+```go
+// Pre-request hook
+preHook := func(req *http.Request) error {
+    req.Header.Set("X-Custom-Header", "value")
+    log.Printf("Making request to: %s", req.URL)
+    return nil
+}
+
+// Post-response hook
+postHook := func(ctx *tls_client.PostResponseContext) error {
+    log.Printf("Response status: %d", ctx.Response.StatusCode)
+    return nil
+}
+
+tls_client.WithPreHook(preHook)
+tls_client.WithPostHook(postHook)
+```
+
+See the [request hooks guide](/guides/request-hooks) for more details.
+
+## Advanced: Custom dialer
+
+Override the built-in TCP dialer for advanced networking scenarios:
+
+```go
+import "context"
+
+customDialer := func(ctx context.Context, network, addr string) (net.Conn, error) {
+    // Custom connection logic (e.g., Zero-DNS, socket tagging)
+    return net.Dial(network, addr)
+}
+
+tls_client.WithDialContext(customDialer)
+```
+
+<Warning>
+When using `WithDialContext()`, you must handle proxy connections yourself. The built-in proxy logic is bypassed.
+</Warning>
+
+## Example: Production configuration
+
+A complete example with recommended production settings:
+
+```go
+jar := tls_client.NewCookieJar()
+
+options := []tls_client.HttpClientOption{
+    // Browser profile
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithRandomTLSExtensionOrder(),
+    
+    // Timeouts and retries
+    tls_client.WithTimeoutSeconds(30),
+    
+    // Cookie management
+    tls_client.WithCookieJar(jar),
+    
+    // Network configuration
+    tls_client.WithProxyUrl("http://user:pass@proxy.example.com:8080"),
+    
+    // Protocol configuration
+    tls_client.WithProtocolRacing(),
+    
+    // Monitoring
+    tls_client.WithBandwidthTracker(),
+    
+    // Error handling
+    tls_client.WithCatchPanics(),
+}
+
+client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+## Next steps
+
+- Learn about [proxy configuration](/guides/proxy-configuration)
+- Set up [cookie management](/guides/cookie-management)
+- Enable [bandwidth tracking](/guides/bandwidth-tracking)
+- Implement [request hooks](/guides/request-hooks)

@@ -1,0 +1,135 @@
+---
+title: TLS fingerprinting
+description: Learn how TLS fingerprinting works and why it matters for web scraping and bot detection
+---
+
+## What is TLS fingerprinting?
+
+TLS fingerprinting is a technique used by servers to identify the client making a connection by analyzing the unique characteristics of the TLS handshake. While changing the `User-Agent` header might have been enough in the past, modern servers use much more sophisticated detection methods.
+
+<Info>
+Even if two requests have identical HTTP headers, they can be distinguished by their TLS handshake parameters, making traditional HTTP-only spoofing ineffective.
+</Info>
+
+## How TLS fingerprinting works
+
+When a client initiates a TLS connection, it sends a `ClientHello` message containing:
+
+- **Cipher suites** - The encryption algorithms the client supports
+- **TLS extensions** - Additional capabilities and features
+- **Extension order** - The sequence in which extensions are sent
+- **Elliptic curves** - Supported curves for key exchange
+- **Signature algorithms** - Methods for certificate verification
+- **Compression methods** - Data compression preferences
+
+Servers can analyze these parameters to create a unique "fingerprint" that identifies the client software.
+
+<Note>
+Real browsers like Chrome, Firefox, and Safari each have distinct TLS fingerprints based on their underlying TLS libraries and version-specific implementations.
+</Note>
+
+## Example: JA3 fingerprinting
+
+One common TLS fingerprinting method is JA3, which creates a hash from:
+
+```
+SSL Version, Accepted Ciphers, List of Extensions, Elliptic Curves, Elliptic Curve Formats
+```
+
+For example, a Chrome browser might produce:
+```
+771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-51-45-43-27-17513,29-23-24,0
+```
+
+This string is then MD5 hashed to produce the JA3 fingerprint.
+
+## Why TLS fingerprinting matters
+
+Servers use TLS fingerprinting to:
+
+1. **Detect bots** - Identify automated clients that don't match real browser fingerprints
+2. **Prevent scraping** - Block requests from non-browser clients
+3. **Enforce policies** - Require specific client versions or security features
+4. **Track users** - Create persistent identifiers across sessions
+
+<Warning>
+Standard HTTP libraries like Go's `net/http`, Python's `requests`, or Node's `https` module all have distinctive TLS fingerprints that are easily detected and blocked by anti-bot systems.
+</Warning>
+
+## How this library solves the problem
+
+The TLS Client library uses [uTLS](https://github.com/refraction-networking/utls) to mimic real browser TLS fingerprints. Instead of using Go's standard TLS implementation, it allows you to:
+
+- **Specify browser profiles** - Mimic Chrome, Firefox, Safari, and other browsers
+- **Match exact versions** - Use fingerprints from specific browser versions
+- **Include all details** - Replicate cipher suites, extensions, curves, and their ordering
+
+### Example comparison
+
+**Standard Go client:**
+```go
+import "net/http"
+
+client := &http.Client{}
+resp, err := client.Get("https://example.com")
+// TLS fingerprint: Easily identified as Go's crypto/tls
+```
+
+**TLS Client with browser profile:**
+```go
+import (
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+)
+
+client, _ := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+    tls_client.WithClientProfile(profiles.Chrome_144),
+)
+resp, err := client.Get("https://example.com")
+// TLS fingerprint: Indistinguishable from Chrome 144
+```
+
+## Testing your fingerprint
+
+You can verify your TLS fingerprint using these services:
+
+- **[tls.peet.ws](https://tls.peet.ws/api/all)** - Comprehensive TLS analysis
+- **[ja3er.com](https://ja3er.com/json)** - JA3 fingerprint checker
+- **[TLS Fingerprint](https://tlsfingerprint.io/)** - Browser fingerprint database
+
+```go
+resp, err := client.Get("https://tls.peet.ws/api/all")
+if err != nil {
+    log.Fatal(err)
+}
+
+body, _ := io.ReadAll(resp.Body)
+fmt.Println(string(body))
+// Shows your TLS fingerprint details and detected client
+```
+
+<Tip>
+Use these testing services during development to ensure your client profile correctly mimics the intended browser.
+</Tip>
+
+## Beyond TLS fingerprinting
+
+While TLS fingerprinting is powerful, modern anti-bot systems also analyze:
+
+- **HTTP/2 fingerprints** - SETTINGS frames, stream priorities, header ordering
+- **HTTP/3 fingerprints** - QUIC settings, frame types, connection parameters
+- **Header consistency** - Matching headers to known browser patterns
+- **Behavioral patterns** - Request timing, navigation flows, JavaScript execution
+
+This library addresses TLS, HTTP/2, and HTTP/3 fingerprinting through its [client profile system](/concepts/client-profiles).
+
+## Related resources
+
+<CardGroup cols={2}>
+  <Card title="Client profiles" icon="browsers" href="/concepts/client-profiles">
+    Learn about browser profile system
+  </Card>
+  <Card title="HTTP protocols" icon="globe" href="/concepts/http-protocols">
+    Understand HTTP/1.1, HTTP/2, HTTP/3 support
+  </Card>
+</CardGroup>

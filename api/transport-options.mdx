@@ -1,0 +1,273 @@
+---
+title: TransportOptions
+description: Configure low-level transport settings for connection pooling, timeouts, and TLS behavior
+---
+
+## Overview
+
+The `TransportOptions` type provides fine-grained control over the HTTP transport layer, including connection pooling, idle timeouts, buffer sizes, and TLS debugging capabilities.
+
+## Type definition
+
+```go
+type TransportOptions struct {
+    KeyLogWriter           io.Writer
+    IdleConnTimeout        *time.Duration
+    RootCAs                *x509.CertPool
+    MaxIdleConns           int
+    MaxIdleConnsPerHost    int
+    MaxConnsPerHost        int
+    MaxResponseHeaderBytes int64
+    WriteBufferSize        int
+    ReadBufferSize         int
+    DisableKeepAlives      bool
+    DisableCompression     bool
+}
+```
+
+## Fields
+
+<ParamField path="KeyLogWriter" type="io.Writer">
+  An `io.Writer` that the TLS client will use to write the TLS master secrets to. This can be used to decrypt TLS connections in Wireshark and other network analysis tools.
+  
+  **Use case**: Debugging TLS traffic by logging session keys to a file.
+</ParamField>
+
+<ParamField path="IdleConnTimeout" type="*time.Duration">
+  The maximum amount of time an idle (keep-alive) connection will remain idle before closing itself. Zero means no limit.
+  
+  **Default**: No specific default when nil.
+</ParamField>
+
+<ParamField path="RootCAs" type="*x509.CertPool">
+  The set of root certificate authorities used to verify the remote server's certificate.
+  
+  **Use case**: Custom certificate validation or adding self-signed certificates.
+</ParamField>
+
+<ParamField path="MaxIdleConns" type="int">
+  Controls the maximum number of idle (keep-alive) connections across all hosts.
+  
+  **Default**: System default when set to 0.
+</ParamField>
+
+<ParamField path="MaxIdleConnsPerHost" type="int">
+  Controls the maximum idle (keep-alive) connections to keep per-host.
+  
+  **Default**: System default when set to 0.
+</ParamField>
+
+<ParamField path="MaxConnsPerHost" type="int">
+  Limits the total number of connections per host, including dialing, active, and idle states.
+  
+  **Default**: No limit when set to 0.
+</ParamField>
+
+<ParamField path="MaxResponseHeaderBytes" type="int64">
+  Specifies a limit on how many response header bytes are allowed. Zero means to use a default limit.
+  
+  **Use case**: Preventing memory exhaustion from malicious servers sending extremely large headers.
+</ParamField>
+
+<ParamField path="WriteBufferSize" type="int">
+  The size of the write buffer. If zero, a default (currently 4KB) is used.
+  
+  **Use case**: Optimizing throughput for high-bandwidth connections.
+</ParamField>
+
+<ParamField path="ReadBufferSize" type="int">
+  The size of the read buffer. If zero, a default (currently 4KB) is used.
+  
+  **Use case**: Optimizing throughput for high-bandwidth connections.
+</ParamField>
+
+<ParamField path="DisableKeepAlives" type="bool">
+  If true, disables HTTP keep-alives and will only use the connection to the server for a single HTTP request.
+  
+  **Default**: false (keep-alives enabled).
+</ParamField>
+
+<ParamField path="DisableCompression" type="bool">
+  If true, prevents the Transport from requesting compression with an "Accept-Encoding: gzip" request header.
+  
+  **Default**: false (compression enabled).
+</ParamField>
+
+## Usage examples
+
+### TLS debugging with Wireshark
+
+Export TLS session keys to decrypt traffic in network analysis tools:
+
+```go
+package main
+
+import (
+    "os"
+    "time"
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+func main() {
+    // Create key log file for Wireshark
+    keyLogFile, err := os.OpenFile("tls-keys.log", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+    if err != nil {
+        panic(err)
+    }
+    defer keyLogFile.Close()
+
+    transportOptions := &tls_client.TransportOptions{
+        KeyLogWriter: keyLogFile,
+    }
+
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+        tls_client.WithTransportOptions(transportOptions),
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    // Make requests - TLS keys will be logged to tls-keys.log
+    resp, err := client.Get("https://example.com")
+    if err != nil {
+        panic(err)
+    }
+    defer resp.Body.Close()
+}
+```
+
+### Connection pooling optimization
+
+Configure connection limits for high-throughput scenarios:
+
+```go
+package main
+
+import (
+    "time"
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+func main() {
+    idleTimeout := 90 * time.Second
+
+    transportOptions := &tls_client.TransportOptions{
+        MaxIdleConns:        100,
+        MaxIdleConnsPerHost: 10,
+        MaxConnsPerHost:     20,
+        IdleConnTimeout:     &idleTimeout,
+        DisableKeepAlives:   false,
+    }
+
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+        tls_client.WithTransportOptions(transportOptions),
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    // Client now supports up to 100 idle connections total,
+    // with 10 idle and 20 total per host
+}
+```
+
+### Custom root CA
+
+Add custom certificate authorities for enterprise environments:
+
+```go
+package main
+
+import (
+    "crypto/x509"
+    "os"
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+func main() {
+    // Load custom CA certificate
+    caCert, err := os.ReadFile("custom-ca.crt")
+    if err != nil {
+        panic(err)
+    }
+
+    // Create certificate pool
+    caCertPool := x509.NewCertPool()
+    caCertPool.AppendCertsFromPEM(caCert)
+
+    transportOptions := &tls_client.TransportOptions{
+        RootCAs: caCertPool,
+    }
+
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+        tls_client.WithTransportOptions(transportOptions),
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    // Client will now trust certificates signed by the custom CA
+}
+```
+
+### Performance tuning
+
+Optimize buffer sizes for large file transfers:
+
+```go
+package main
+
+import (
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+func main() {
+    transportOptions := &tls_client.TransportOptions{
+        ReadBufferSize:  64 * 1024,  // 64KB read buffer
+        WriteBufferSize: 64 * 1024,  // 64KB write buffer
+        MaxResponseHeaderBytes: 1024 * 1024, // 1MB header limit
+    }
+
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+        tls_client.WithTransportOptions(transportOptions),
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    // Optimized for large file downloads
+}
+```
+
+### Disable compression
+
+Prevent automatic compression for pre-compressed content:
+
+```go
+package main
+
+import (
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+func main() {
+    transportOptions := &tls_client.TransportOptions{
+        DisableCompression: true,
+    }
+
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+        tls_client.WithTransportOptions(transportOptions),
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    // Client won't request gzip encoding automatically
+}
+```
+
+## Related options
+
+- Use [`WithTransportOptions()`](/api/client-options#withtransportoptions) to apply transport settings to a client
+- See [`WithInsecureSkipVerify()`](/api/client-options#withinsecureskipverify) for disabling certificate verification
+- See [`WithTimeoutSeconds()`](/api/client-options#withtimeoutseconds) for request-level timeouts

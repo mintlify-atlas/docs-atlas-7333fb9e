@@ -1,0 +1,327 @@
+---
+title: Basic usage
+description: Learn how to make HTTP requests using the TLS Client library
+---
+
+The TLS Client provides several methods for making HTTP requests, similar to Go's standard `net/http` package. This guide covers the basic HTTP methods and how to use them.
+
+## Creating a client
+
+Before making requests, you need to create an HTTP client with your desired configuration:
+
+```go
+package main
+
+import (
+    "log"
+    
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+)
+
+func main() {
+    jar := tls_client.NewCookieJar()
+    
+    options := []tls_client.HttpClientOption{
+        tls_client.WithTimeoutSeconds(30),
+        tls_client.WithClientProfile(profiles.Chrome_133),
+        tls_client.WithCookieJar(jar),
+    }
+    
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Use the client to make requests
+}
+```
+
+<Note>
+Always create a cookie jar if you need to maintain session state across requests. Without it, cookies won't be stored or sent.
+</Note>
+
+## Making GET requests
+
+The `Get()` method is the simplest way to make GET requests:
+
+```go
+resp, err := client.Get("https://api.example.com/data")
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+
+log.Printf("Status: %d", resp.StatusCode)
+```
+
+For more control over headers and other request properties, use `Do()` with a custom request:
+
+```go
+import http "github.com/bogdanfinn/fhttp"
+
+req, err := http.NewRequest(http.MethodGet, "https://api.example.com/data", nil)
+if err != nil {
+    log.Fatal(err)
+}
+
+req.Header = http.Header{
+    "accept":          {"application/json"},
+    "accept-language": {"en-US,en;q=0.9"},
+    "user-agent":      {"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"},
+    http.HeaderOrderKey: {
+        "accept",
+        "accept-language",
+        "user-agent",
+    },
+}
+
+resp, err := client.Do(req)
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+```
+
+<Tip>
+Use `http.HeaderOrderKey` to specify the exact order of headers in the request. This is important for matching real browser behavior.
+</Tip>
+
+## Making POST requests
+
+The `Post()` method sends POST requests with a content type and body:
+
+```go
+import (
+    "strings"
+    "net/url"
+)
+
+// URL-encoded form data
+postData := url.Values{}
+postData.Add("username", "john")
+postData.Add("password", "secret")
+
+resp, err := client.Post(
+    "https://api.example.com/login",
+    "application/x-www-form-urlencoded",
+    strings.NewReader(postData.Encode()),
+)
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+```
+
+For JSON POST requests, use `Do()` with a custom request:
+
+```go
+import (
+    "bytes"
+    "encoding/json"
+)
+
+data := map[string]string{
+    "username": "john",
+    "email":    "john@example.com",
+}
+
+jsonData, err := json.Marshal(data)
+if err != nil {
+    log.Fatal(err)
+}
+
+req, err := http.NewRequest(
+    http.MethodPost,
+    "https://api.example.com/users",
+    bytes.NewBuffer(jsonData),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+req.Header.Set("Content-Type", "application/json")
+
+resp, err := client.Do(req)
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+```
+
+## Making HEAD requests
+
+The `Head()` method retrieves only the headers without the response body:
+
+```go
+resp, err := client.Head("https://api.example.com/large-file")
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+
+contentLength := resp.Header.Get("Content-Length")
+contentType := resp.Header.Get("Content-Type")
+
+log.Printf("Size: %s, Type: %s", contentLength, contentType)
+```
+
+## Using the Do method
+
+The `Do()` method provides full control over the request and is the most flexible option:
+
+```go
+req, err := http.NewRequest(http.MethodGet, "https://api.example.com/data", nil)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Set custom headers
+req.Header = http.Header{
+    "accept":          {"*/*"},
+    "accept-encoding": {"gzip, deflate, br"},
+    "accept-language": {"en-US,en;q=0.9"},
+    "cache-control":   {"no-cache"},
+    "user-agent":      {"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"},
+    http.HeaderOrderKey: {
+        "accept",
+        "accept-encoding",
+        "accept-language",
+        "cache-control",
+        "user-agent",
+    },
+}
+
+// Add query parameters
+q := req.URL.Query()
+q.Add("page", "1")
+q.Add("limit", "50")
+req.URL.RawQuery = q.Encode()
+
+resp, err := client.Do(req)
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+```
+
+## Reading response bodies
+
+Always read and close the response body to prevent resource leaks:
+
+```go
+import "io"
+
+resp, err := client.Get("https://api.example.com/data")
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+
+// Read entire body
+body, err := io.ReadAll(resp.Body)
+if err != nil {
+    log.Fatal(err)
+}
+
+log.Printf("Response: %s", string(body))
+```
+
+For JSON responses:
+
+```go
+type Response struct {
+    Success bool   `json:"success"`
+    Message string `json:"message"`
+    Data    any    `json:"data"`
+}
+
+resp, err := client.Get("https://api.example.com/data")
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+
+var result Response
+if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+    log.Fatal(err)
+}
+
+log.Printf("Success: %v, Message: %s", result.Success, result.Message)
+```
+
+## Handling redirects
+
+By default, the client follows redirects automatically. You can control this behavior:
+
+```go
+// Disable redirect following
+options := []tls_client.HttpClientOption{
+    tls_client.WithTimeoutSeconds(30),
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithNotFollowRedirects(),
+}
+
+client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+
+// Make request - will return 3xx status codes
+resp, err := client.Get("https://example.com/redirect")
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+
+log.Printf("Status: %d", resp.StatusCode) // Will be 301, 302, etc.
+```
+
+You can also toggle redirect following at runtime:
+
+```go
+// Disable redirects
+client.SetFollowRedirect(false)
+
+resp, err := client.Get("https://example.com/redirect")
+// Returns redirect response without following
+
+// Enable redirects
+client.SetFollowRedirect(true)
+
+resp, err = client.Get("https://example.com/redirect")
+// Follows the redirect automatically
+```
+
+## Best practices
+
+<Steps>
+
+### Always close response bodies
+
+Use `defer resp.Body.Close()` immediately after checking for errors to prevent memory leaks.
+
+### Use appropriate timeouts
+
+Set reasonable timeouts to prevent hanging requests:
+
+```go
+tls_client.WithTimeoutSeconds(30)
+```
+
+### Reuse clients
+
+Create one client and reuse it for multiple requests to benefit from connection pooling.
+
+### Handle errors properly
+
+Always check for errors after making requests and reading response bodies.
+
+</Steps>
+
+<Warning>
+If you don't read the response body completely before closing it, the underlying connection cannot be reused. Always read the full body even if you don't need the data.
+</Warning>
+
+## Next steps
+
+- Learn about [client configuration options](/guides/client-options)
+- Set up [proxy support](/guides/proxy-configuration)
+- Manage [cookies and sessions](/guides/cookie-management)

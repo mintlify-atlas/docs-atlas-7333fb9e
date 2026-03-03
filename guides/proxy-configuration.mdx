@@ -1,0 +1,401 @@
+---
+title: Proxy configuration
+description: Configure HTTP and SOCKS5 proxies with authentication and dynamic proxy rotation
+---
+
+The TLS Client supports HTTP and SOCKS5 proxies with authentication, allowing you to route traffic through proxy servers. You can configure proxies at initialization or change them dynamically at runtime.
+
+## Basic proxy configuration
+
+Set a proxy when creating the client:
+
+```go
+import (
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+)
+
+options := []tls_client.HttpClientOption{
+    tls_client.WithTimeoutSeconds(30),
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithProxyUrl("http://user:pass@proxy.example.com:8080"),
+}
+
+client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+if err != nil {
+    log.Fatal(err)
+}
+
+// All requests will use the proxy
+resp, err := client.Get("https://api.ipify.org?format=json")
+```
+
+## Proxy URL formats
+
+The client supports multiple proxy protocols:
+
+### HTTP proxy
+
+```go
+// Without authentication
+tls_client.WithProxyUrl("http://proxy.example.com:8080")
+
+// With authentication
+tls_client.WithProxyUrl("http://username:password@proxy.example.com:8080")
+```
+
+### SOCKS5 proxy
+
+```go
+// Without authentication
+tls_client.WithProxyUrl("socks5://proxy.example.com:1080")
+
+// With authentication
+tls_client.WithProxyUrl("socks5://username:password@proxy.example.com:1080")
+
+// SOCKS5h (DNS resolution through proxy)
+tls_client.WithProxyUrl("socks5h://username:password@proxy.example.com:1080")
+```
+
+<Note>
+Use `socks5h://` instead of `socks5://` if you want DNS queries to be resolved by the proxy server rather than locally.
+</Note>
+
+## Charles Proxy for debugging
+
+Quick setup for local Charles Proxy debugging:
+
+```go
+// Uses default 127.0.0.1:8888
+tls_client.WithCharlesProxy("127.0.0.1", "8888")
+
+// Or with default values
+tls_client.WithCharlesProxy("", "")
+```
+
+This is equivalent to:
+
+```go
+tls_client.WithProxyUrl("http://127.0.0.1:8888")
+```
+
+## Dynamic proxy rotation
+
+Change the proxy at runtime without recreating the client:
+
+```go
+client, err := tls_client.NewHttpClient(
+    tls_client.NewNoopLogger(),
+    tls_client.WithTimeoutSeconds(30),
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithProxyUrl("http://user:pass@proxy1.example.com:8080"),
+)
+
+// Make request with first proxy
+resp1, err := client.Get("https://api.ipify.org?format=json")
+if err != nil {
+    log.Fatal(err)
+}
+defer resp1.Body.Close()
+
+// Switch to second proxy
+err = client.SetProxy("http://user:pass@proxy2.example.com:8080")
+if err != nil {
+    log.Fatal(err)
+}
+
+// Make request with second proxy
+resp2, err := client.Get("https://api.ipify.org?format=json")
+if err != nil {
+    log.Fatal(err)
+}
+defer resp2.Body.Close()
+```
+
+### Removing a proxy
+
+Set an empty string to remove the proxy:
+
+```go
+err = client.SetProxy("")
+if err != nil {
+    log.Fatal(err)
+}
+
+// Subsequent requests will not use a proxy
+```
+
+### Getting current proxy
+
+Retrieve the currently configured proxy:
+
+```go
+currentProxy := client.GetProxy()
+log.Printf("Current proxy: %s", currentProxy)
+```
+
+## Complete example with proxy rotation
+
+```go
+package main
+
+import (
+    "encoding/json"
+    "fmt"
+    "io"
+    "log"
+
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+)
+
+type IPResponse struct {
+    IP string `json:"ip"`
+}
+
+func main() {
+    // List of proxies to rotate through
+    proxies := []string{
+        "http://user1:pass1@proxy1.example.com:8080",
+        "http://user2:pass2@proxy2.example.com:8080",
+        "http://user3:pass3@proxy3.example.com:8080",
+    }
+
+    options := []tls_client.HttpClientOption{
+        tls_client.WithTimeoutSeconds(30),
+        tls_client.WithClientProfile(profiles.Chrome_133),
+        tls_client.WithProxyUrl(proxies[0]),
+    }
+
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Make requests with different proxies
+    for i, proxy := range proxies {
+        // Set the proxy
+        if i > 0 { // First proxy is already set
+            err := client.SetProxy(proxy)
+            if err != nil {
+                log.Printf("Failed to set proxy %s: %v", proxy, err)
+                continue
+            }
+        }
+
+        // Make request
+        resp, err := client.Get("https://api.ipify.org?format=json")
+        if err != nil {
+            log.Printf("Request failed with proxy %d: %v", i+1, err)
+            continue
+        }
+
+        body, err := io.ReadAll(resp.Body)
+        resp.Body.Close()
+        if err != nil {
+            log.Printf("Failed to read response: %v", err)
+            continue
+        }
+
+        var ipResp IPResponse
+        if err := json.Unmarshal(body, &ipResp); err != nil {
+            log.Printf("Failed to parse response: %v", err)
+            continue
+        }
+
+        fmt.Printf("Proxy %d - IP: %s\n", i+1, ipResp.IP)
+    }
+}
+```
+
+## Proxy authentication
+
+Authentication credentials are included in the proxy URL:
+
+```go
+// URL encode special characters in credentials
+username := "user@domain"
+password := "p@ssw0rd!"
+
+// Proper encoding
+proxyURL := fmt.Sprintf("http://%s:%s@proxy.example.com:8080",
+    url.QueryEscape(username),
+    url.QueryEscape(password),
+)
+
+tls_client.WithProxyUrl(proxyURL)
+```
+
+<Tip>
+Always URL-encode proxy credentials if they contain special characters like `@`, `:`, or `/`.
+</Tip>
+
+## Custom proxy headers
+
+For HTTP CONNECT proxies, you can specify custom headers:
+
+```go
+import http "github.com/bogdanfinn/fhttp"
+
+connectHeaders := http.Header{
+    "Proxy-Authorization": {"Bearer token123"},
+    "X-Custom-Header":     {"custom-value"},
+}
+
+options := []tls_client.HttpClientOption{
+    tls_client.WithProxyUrl("http://proxy.example.com:8080"),
+    tls_client.WithConnectHeaders(connectHeaders),
+}
+
+client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+```
+
+## Advanced: Custom proxy dialer
+
+For advanced use cases, implement a custom proxy dialer:
+
+```go
+import (
+    "context"
+    "net"
+    "time"
+
+    http "github.com/bogdanfinn/fhttp"
+    "golang.org/x/net/proxy"
+)
+
+customDialerFactory := func(
+    proxyURL string,
+    timeout time.Duration,
+    localAddr *net.TCPAddr,
+    connectHeaders http.Header,
+    logger tls_client.Logger,
+) (proxy.ContextDialer, error) {
+    // Implement custom proxy logic
+    // This is called when the client needs to create a new connection
+    
+    return &customDialer{
+        proxyURL: proxyURL,
+        timeout:  timeout,
+    }, nil
+}
+
+tls_client.WithProxyDialerFactory(customDialerFactory)
+```
+
+<Warning>
+When using `WithProxyDialerFactory()`, you cannot also use `WithProxyUrl()`. Only one proxy configuration method can be active at a time.
+</Warning>
+
+## Proxy error handling
+
+Always handle proxy errors gracefully:
+
+```go
+err := client.SetProxy("http://invalid-proxy:9999")
+if err != nil {
+    log.Printf("Failed to set proxy: %v", err)
+    
+    // Roll back to previous proxy
+    err = client.SetProxy("http://working-proxy.example.com:8080")
+    if err != nil {
+        log.Fatal("Failed to roll back to working proxy")
+    }
+}
+```
+
+The client automatically rolls back to the previous proxy if setting a new proxy fails.
+
+## Testing proxy configuration
+
+Verify your proxy is working correctly:
+
+```go
+import http "github.com/bogdanfinn/fhttp"
+
+options := []tls_client.HttpClientOption{
+    tls_client.WithTimeoutSeconds(10),
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithProxyUrl("http://user:pass@proxy.example.com:8080"),
+}
+
+client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Test proxy connectivity
+req, err := http.NewRequest("GET", "https://api.ipify.org?format=json", nil)
+if err != nil {
+    log.Fatal(err)
+}
+
+resp, err := client.Do(req)
+if err != nil {
+    log.Printf("Proxy test failed: %v", err)
+    return
+}
+defer resp.Body.Close()
+
+if resp.StatusCode == 200 {
+    body, _ := io.ReadAll(resp.Body)
+    log.Printf("Proxy working. External IP: %s", string(body))
+} else {
+    log.Printf("Unexpected status code: %d", resp.StatusCode)
+}
+```
+
+## Best practices
+
+<Steps>
+
+### Use connection pooling
+
+Reuse the same client instance to benefit from connection pooling with the proxy.
+
+### Handle proxy failures
+
+Implement fallback logic to switch proxies when one fails:
+
+```go
+proxies := []string{"http://proxy1", "http://proxy2", "http://proxy3"}
+
+for _, proxy := range proxies {
+    client.SetProxy(proxy)
+    resp, err := client.Get(url)
+    if err == nil {
+        // Success
+        return resp, nil
+    }
+}
+
+return nil, errors.New("all proxies failed")
+```
+
+### Monitor proxy performance
+
+Track which proxies are performing well:
+
+```go
+start := time.Now()
+resp, err := client.Get(url)
+duration := time.Since(start)
+
+log.Printf("Proxy %s responded in %v", client.GetProxy(), duration)
+```
+
+### Validate proxy before use
+
+Test proxy connectivity before adding it to your rotation pool.
+
+</Steps>
+
+<Note>
+Proxy configuration is automatically applied to all connection types, including HTTP/1.1, HTTP/2, and HTTP/3.
+</Note>
+
+## Next steps
+
+- Learn about [client options](/guides/client-options)
+- Set up [certificate pinning](/guides/certificate-pinning) for proxy connections
+- Implement [request hooks](/guides/request-hooks) to log proxy usage

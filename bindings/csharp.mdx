@@ -1,0 +1,412 @@
+---
+title: C# bindings
+description: Using TLS Client from C# with DllImport
+---
+
+The TLS Client can be used from C# by loading the shared library with P/Invoke (Platform Invocation Services).
+
+## Installation
+
+No additional dependencies are required beyond the standard .NET libraries. You'll also need the Newtonsoft.Json package for JSON serialization:
+
+```bash
+dotnet add package Newtonsoft.Json
+```
+
+## Loading the library
+
+Download the appropriate shared library for your platform:
+
+- macOS: `tls-client-darwin-amd64-1.7.2.dylib`
+- Linux: `tls-client-xgo-1.7.2-linux-amd64.so`
+- Windows: `tls-client-windows-64-1.7.2.dll`
+
+Define the P/Invoke declarations:
+
+```csharp
+using System;
+using System.Runtime.InteropServices;
+using Newtonsoft.Json;
+
+[DllImport("../dist/tls-client-windows-64-1.7.2.dll", CallingConvention = CallingConvention.Cdecl)]
+public static extern IntPtr request(byte[] requestPayload, string sessionID);
+
+[DllImport("../dist/tls-client-windows-64-1.7.2.dll", CallingConvention = CallingConvention.Cdecl)]
+public static extern void freeMemory(string sessionID);
+```
+
+## Creating a TLS session wrapper
+
+Here's a complete wrapper class that simplifies working with the TLS Client:
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+using Newtonsoft.Json;
+
+class RequestResult
+{
+    public string Id { get; set; }
+    public string Body { get; set; }
+    public object Cookies { get; set; }
+    public Dictionary<string, List<string>> Headers { get; set; }
+    public int Status { get; set; }
+    public string Target { get; set; }
+    public string UsedProtocol { get; set; }
+}
+
+class RequestPayload
+{
+    public string TlsClientIdentifier { get; set; } = "FireFox110";
+    public bool FollowRedirects { get; set; } = true;
+    public bool InsecureSkipVerify { get; set; } = false;
+    public bool WithoutCookieJar { get; set; } = false;
+    public bool WithCustomCookieJar { get; set; } = false;
+    public bool IsByteRequest { get; set; } = false;
+    public bool ForceHttp1 { get; set; } = false;
+    public bool WithDebug { get; set; } = false;
+    public bool CatchPanics { get; set; } = false;
+    public bool WithRandomTLSExtensionOrder { get; set; } = false;
+    public string sessionId { get; set; } = "Nada";
+    public int TimeoutSeconds { get; set; } = 30;
+    public int TimeoutMilliseconds { get; set; } = 0;
+    public Dictionary<string, string> CertificatePinningHosts { get; set; } = new Dictionary<string, string>();
+    public string ProxyUrl { get; set; } = "";
+    public bool IsRotatingProxy { get; set; } = false;
+    public Dictionary<string, string> Headers { get; set; } = new Dictionary<string, string>();
+    public List<string> HeaderOrder { get; set; }
+    public string RequestUrl { get; set; }
+    public string RequestMethod { get; set; }
+    public string RequestBody { get; set; }
+}
+
+class TLSSession
+{
+    [DllImport("../dist/tls-client-windows-64-1.7.2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr request(byte[] requestPayload, string sessionID);
+
+    [DllImport("../dist/tls-client-windows-64-1.7.2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern void freeMemory(string sessionID);
+
+    private string sessionID;
+    private RequestPayload sessionPayload;
+
+    public TLSSession(
+        Dictionary<string, string> headers = null,
+        string TlsClientIdentifier = "FireFox110",
+        int TimeoutSeconds = 30,
+        bool FollowRedirects = true,
+        string proxy = null)
+    {
+        this.sessionID = Guid.NewGuid().ToString();
+
+        this.sessionPayload = new RequestPayload
+        {
+            TlsClientIdentifier = TlsClientIdentifier,
+            FollowRedirects = FollowRedirects,
+            InsecureSkipVerify = false,
+            IsByteRequest = false,
+            ForceHttp1 = false,
+            WithDebug = false,
+            CatchPanics = false,
+            WithRandomTLSExtensionOrder = true,
+            sessionId = this.sessionID,
+            TimeoutSeconds = TimeoutSeconds,
+            TimeoutMilliseconds = 0,
+            CertificatePinningHosts = new Dictionary<string, string>(),
+            ProxyUrl = "",
+            IsRotatingProxy = false,
+            Headers = headers ?? new Dictionary<string, string>(),
+            HeaderOrder = headers != null ? new List<string>(headers.Keys) : new List<string>(),
+            RequestUrl = "",
+            RequestMethod = "",
+            RequestBody = "",
+        };
+        
+        if (proxy != null)
+        {
+            Console.WriteLine(proxy);
+            this.sessionPayload.ProxyUrl = proxy;
+        }
+    }
+
+    public RequestResult Get(string url, Dictionary<string, string> additionalHeaders = null)
+    {
+        return this.MakeRequest("GET", url, MergeHeaders(this.sessionPayload.Headers, additionalHeaders));
+    }
+
+    public RequestResult Post(string url, Dictionary<string, string> additionalHeaders = null, string body = "")
+    {
+        return this.MakeRequest("POST", url, MergeHeaders(this.sessionPayload.Headers, additionalHeaders), body);
+    }
+    
+    public RequestResult Patch(string url, Dictionary<string, string> additionalHeaders = null, string body = "")
+    {
+        return this.MakeRequest("PATCH", url, MergeHeaders(this.sessionPayload.Headers, additionalHeaders), body);
+    }
+    
+    public RequestResult Put(string url, Dictionary<string, string> additionalHeaders = null, string body = "")
+    {
+        return this.MakeRequest("PUT", url, MergeHeaders(this.sessionPayload.Headers, additionalHeaders), body);
+    }
+    
+    public RequestResult Delete(string url, Dictionary<string, string> additionalHeaders = null)
+    {
+        return this.MakeRequest("DELETE", url, MergeHeaders(this.sessionPayload.Headers, additionalHeaders));
+    }
+    
+    private RequestResult MakeRequest(string method, string url, Dictionary<string, string> headers, string body = "")
+    {
+        this.sessionPayload.RequestMethod = method;
+        this.sessionPayload.RequestUrl = url;
+        this.sessionPayload.Headers = headers;
+        this.sessionPayload.RequestBody = body;
+
+        string requestJson = JsonConvert.SerializeObject(this.sessionPayload);
+        byte[] requestBytes = Encoding.UTF8.GetBytes(requestJson);
+
+        IntPtr responsePtr = request(requestBytes, this.sessionID);
+        string responseJson = Marshal.PtrToStringAnsi(responsePtr);
+
+        RequestResult result = JsonConvert.DeserializeObject<RequestResult>(responseJson);
+        freeMemory(result.Id);
+
+        return result;
+    }
+
+    private Dictionary<string, string> MergeHeaders(Dictionary<string, string> originalHeaders, Dictionary<string, string> additionalHeaders)
+    {
+        if (additionalHeaders == null) return originalHeaders;
+
+        foreach (var header in additionalHeaders)
+        {
+            originalHeaders[header.Key] = header.Value;
+        }
+
+        return originalHeaders;
+    }
+}
+```
+
+## Making requests
+
+Once you have the wrapper class, making requests is straightforward:
+
+### GET request
+
+```csharp
+var headers = new Dictionary<string, string>
+{
+    { "accept", "text/html,application/xhtml+xml,application/xml;q=0.9" },
+    { "user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+    { "accept-encoding", "gzip, deflate, br" },
+    { "accept-language", "en-US,en;q=0.9" }
+};
+
+var session = new TLSSession(
+    headers: headers,
+    TlsClientIdentifier: "chrome_103",
+    TimeoutSeconds: 30,
+    FollowRedirects: true
+);
+
+var result = session.Get("https://example.com");
+
+if (result.Status == 200)
+{
+    Console.WriteLine("Success:");
+    Console.WriteLine(result.Body);
+}
+else if (result.Status == 0)
+{
+    Console.WriteLine("Error:");
+    Console.WriteLine(result.Body);
+}
+else
+{
+    Console.WriteLine($"Status: {result.Status}");
+    Console.WriteLine(result.Body);
+}
+```
+
+### POST request
+
+```csharp
+var headers = new Dictionary<string, string>
+{
+    { "accept", "application/json" },
+    { "user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+    { "content-type", "application/json" },
+    { "accept-encoding", "gzip, deflate, br" }
+};
+
+var session = new TLSSession(
+    headers: headers,
+    TlsClientIdentifier: "chrome_103"
+);
+
+string jsonBody = JsonConvert.SerializeObject(new
+{
+    username = "user",
+    password = "pass"
+});
+
+var result = session.Post(
+    "https://api.example.com/login",
+    additionalHeaders: null,
+    body: jsonBody
+);
+
+Console.WriteLine($"Status: {result.Status}");
+Console.WriteLine(result.Body);
+```
+
+### Using a proxy
+
+```csharp
+var session = new TLSSession(
+    headers: headers,
+    TlsClientIdentifier: "chrome_103",
+    proxy: "http://proxy.example.com:8080"
+);
+
+var result = session.Get("https://example.com");
+```
+
+## HTTP methods
+
+The `TLSSession` class supports all common HTTP methods:
+
+<Tabs>
+  <Tab title="GET">
+    ```csharp
+    var result = session.Get("https://example.com");
+    ```
+  </Tab>
+  <Tab title="POST">
+    ```csharp
+    var result = session.Post(
+        "https://example.com/api",
+        additionalHeaders: null,
+        body: "key=value"
+    );
+    ```
+  </Tab>
+  <Tab title="PUT">
+    ```csharp
+    var result = session.Put(
+        "https://example.com/api/resource",
+        additionalHeaders: null,
+        body: jsonBody
+    );
+    ```
+  </Tab>
+  <Tab title="PATCH">
+    ```csharp
+    var result = session.Patch(
+        "https://example.com/api/resource",
+        additionalHeaders: null,
+        body: jsonBody
+    );
+    ```
+  </Tab>
+  <Tab title="DELETE">
+    ```csharp
+    var result = session.Delete("https://example.com/api/resource");
+    ```
+  </Tab>
+</Tabs>
+
+## Working with headers
+
+You can set default headers when creating a session and override them per request:
+
+```csharp
+// Default headers for all requests
+var defaultHeaders = new Dictionary<string, string>
+{
+    { "accept", "application/json" },
+    { "user-agent", "MyApp/1.0" }
+};
+
+var session = new TLSSession(headers: defaultHeaders);
+
+// Override headers for a specific request
+var customHeaders = new Dictionary<string, string>
+{
+    { "authorization", "Bearer token123" },
+    { "x-api-key", "key123" }
+};
+
+var result = session.Get("https://api.example.com", customHeaders);
+```
+
+## Error handling
+
+Check the status code to handle errors:
+
+```csharp
+var result = session.Get("https://example.com");
+
+if (result.Status == 0)
+{
+    // Request failed - error message in Body
+    Console.WriteLine($"Request failed: {result.Body}");
+}
+else if (result.Status >= 200 && result.Status < 300)
+{
+    // Success
+    Console.WriteLine($"Success: {result.Body}");
+}
+else
+{
+    // HTTP error status
+    Console.WriteLine($"HTTP {result.Status}: {result.Body}");
+}
+```
+
+## Response structure
+
+The `RequestResult` class contains all response information:
+
+```csharp
+var result = session.Get("https://example.com");
+
+Console.WriteLine($"ID: {result.Id}");
+Console.WriteLine($"Status: {result.Status}");
+Console.WriteLine($"Body: {result.Body}");
+Console.WriteLine($"Target: {result.Target}");
+Console.WriteLine($"Protocol: {result.UsedProtocol}");
+
+foreach (var header in result.Headers)
+{
+    Console.WriteLine($"{header.Key}: {string.Join(", ", header.Value)}");
+}
+```
+
+## Platform-specific DllImport
+
+Adjust the library path based on your platform:
+
+<Tabs>
+  <Tab title="Windows">
+    ```csharp
+    [DllImport("tls-client-windows-64-1.7.2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr request(byte[] requestPayload, string sessionID);
+    ```
+  </Tab>
+  <Tab title="Linux">
+    ```csharp
+    [DllImport("tls-client-xgo-1.7.2-linux-amd64.so", CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr request(byte[] requestPayload, string sessionID);
+    ```
+  </Tab>
+  <Tab title="macOS">
+    ```csharp
+    [DllImport("tls-client-darwin-amd64-1.7.2.dylib", CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr request(byte[] requestPayload, string sessionID);
+    ```
+  </Tab>
+</Tabs>

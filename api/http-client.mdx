@@ -1,0 +1,678 @@
+---
+title: HttpClient
+description: The main HTTP client interface for making requests with custom TLS fingerprints
+---
+
+## Constructor
+
+### NewHttpClient
+
+Creates a new HTTP client with the specified logger and configuration options.
+
+```go
+func NewHttpClient(logger Logger, options ...HttpClientOption) (HttpClient, error)
+```
+
+<ParamField path="logger" type="Logger">
+  Logger instance for debugging and diagnostics. Pass `nil` to use a no-op logger, or use `NewLogger()` for default logging.
+</ParamField>
+
+<ParamField path="options" type="...HttpClientOption">
+  Variable number of configuration options. See [Client options](/api/client-options) for available options.
+</ParamField>
+
+<ResponseField name="HttpClient" type="HttpClient">
+  The configured HTTP client instance.
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if client creation fails (e.g., invalid configuration).
+</ResponseField>
+
+**Example:**
+
+```go
+client, err := tls_client.NewHttpClient(tls_client.NewLogger(),
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithTimeoutSeconds(30),
+    tls_client.WithProxy("http://proxy.example.com:8080"),
+)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+### ProvideDefaultClient
+
+Creates a new HTTP client with default options and an automatically configured cookie jar.
+
+```go
+func ProvideDefaultClient(logger Logger) (HttpClient, error)
+```
+
+<ParamField path="logger" type="Logger">
+  Logger instance for debugging and diagnostics.
+</ParamField>
+
+<ResponseField name="HttpClient" type="HttpClient">
+  The configured HTTP client with default settings.
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if client creation fails.
+</ResponseField>
+
+**Default options applied:**
+- Timeout: 30 seconds
+- Client profile: DefaultClientProfile
+- Random TLS extension order: enabled
+- Follow redirects: disabled
+- Cookie jar: enabled
+
+**Example:**
+
+```go
+client, err := tls_client.ProvideDefaultClient(nil)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+## Request methods
+
+### Do
+
+Issues an HTTP request and returns the corresponding response.
+
+```go
+func (c *httpClient) Do(req *http.Request) (*http.Response, error)
+```
+
+<ParamField path="req" type="*http.Request">
+  The HTTP request to execute. Use `http.NewRequest()` or `http.NewRequestWithContext()` to create requests.
+</ParamField>
+
+<ResponseField name="response" type="*http.Response">
+  The HTTP response. Contains a non-nil body that must be closed by the caller.
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if the request fails. If error is nil, the response will have a non-nil body.
+</ResponseField>
+
+**Example:**
+
+```go
+req, err := http.NewRequest(http.MethodGet, "https://api.example.com/data", nil)
+if err != nil {
+    log.Fatal(err)
+}
+
+req.Header.Set("Authorization", "Bearer token123")
+req.Header.Set("User-Agent", "MyApp/1.0")
+
+resp, err := client.Do(req)
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+
+body, _ := io.ReadAll(resp.Body)
+fmt.Println(string(body))
+```
+
+### Get
+
+Issues a GET request to the specified URL.
+
+```go
+func (c *httpClient) Get(url string) (resp *http.Response, err error)
+```
+
+<ParamField path="url" type="string">
+  The URL to request.
+</ParamField>
+
+<ResponseField name="resp" type="*http.Response">
+  The HTTP response with a non-nil body that must be closed.
+</ResponseField>
+
+<ResponseField name="err" type="error">
+  Error if the request fails.
+</ResponseField>
+
+**Example:**
+
+```go
+resp, err := client.Get("https://api.example.com/users")
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+
+if resp.StatusCode == 200 {
+    body, _ := io.ReadAll(resp.Body)
+    fmt.Println(string(body))
+}
+```
+
+### Head
+
+Issues a HEAD request to the specified URL.
+
+```go
+func (c *httpClient) Head(url string) (resp *http.Response, err error)
+```
+
+<ParamField path="url" type="string">
+  The URL to request.
+</ParamField>
+
+<ResponseField name="resp" type="*http.Response">
+  The HTTP response. HEAD responses have no body.
+</ResponseField>
+
+<ResponseField name="err" type="error">
+  Error if the request fails.
+</ResponseField>
+
+**Example:**
+
+```go
+resp, err := client.Head("https://api.example.com/status")
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+
+fmt.Println("Content-Length:", resp.Header.Get("Content-Length"))
+fmt.Println("Last-Modified:", resp.Header.Get("Last-Modified"))
+```
+
+### Post
+
+Issues a POST request to the specified URL with the given content type and body.
+
+```go
+func (c *httpClient) Post(url, contentType string, body io.Reader) (resp *http.Response, err error)
+```
+
+<ParamField path="url" type="string">
+  The URL to request.
+</ParamField>
+
+<ParamField path="contentType" type="string">
+  The Content-Type header value (e.g., `"application/json"`, `"application/x-www-form-urlencoded"`).
+</ParamField>
+
+<ParamField path="body" type="io.Reader">
+  The request body data.
+</ParamField>
+
+<ResponseField name="resp" type="*http.Response">
+  The HTTP response with a non-nil body that must be closed.
+</ResponseField>
+
+<ResponseField name="err" type="error">
+  Error if the request fails.
+</ResponseField>
+
+**Example:**
+
+```go
+// JSON POST
+jsonData := []byte(`{"username":"john","email":"john@example.com"}`)
+resp, err := client.Post(
+    "https://api.example.com/users",
+    "application/json",
+    bytes.NewBuffer(jsonData),
+)
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+
+// Form POST
+formData := url.Values{}
+formData.Set("username", "john")
+formData.Set("email", "john@example.com")
+
+resp, err = client.Post(
+    "https://api.example.com/users",
+    "application/x-www-form-urlencoded",
+    strings.NewReader(formData.Encode()),
+)
+```
+
+## Cookie management
+
+### GetCookies
+
+Returns the cookies stored in the client's cookie jar for a given URL.
+
+```go
+func (c *httpClient) GetCookies(u *url.URL) []*http.Cookie
+```
+
+<ParamField path="u" type="*url.URL">
+  The URL to retrieve cookies for. Only cookies that match the URL's domain and path are returned.
+</ParamField>
+
+<ResponseField name="cookies" type="[]*http.Cookie">
+  Array of cookies for the specified URL. Returns `nil` if no cookie jar is configured.
+</ResponseField>
+
+**Example:**
+
+```go
+u, _ := url.Parse("https://example.com")
+cookies := client.GetCookies(u)
+
+for _, cookie := range cookies {
+    fmt.Printf("%s = %s\n", cookie.Name, cookie.Value)
+}
+```
+
+### SetCookies
+
+Sets cookies in the client's cookie jar for a given URL.
+
+```go
+func (c *httpClient) SetCookies(u *url.URL, cookies []*http.Cookie)
+```
+
+<ParamField path="u" type="*url.URL">
+  The URL to associate cookies with.
+</ParamField>
+
+<ParamField path="cookies" type="[]*http.Cookie">
+  Array of cookies to set.
+</ParamField>
+
+**Example:**
+
+```go
+u, _ := url.Parse("https://example.com")
+cookies := []*http.Cookie{
+    {Name: "session_id", Value: "abc123", Path: "/", Domain: "example.com"},
+    {Name: "user_pref", Value: "dark_mode", Path: "/", Domain: "example.com"},
+}
+
+client.SetCookies(u, cookies)
+```
+
+### SetCookieJar
+
+Replaces the client's cookie jar with a new one. This is the recommended way to clear all cookies.
+
+```go
+func (c *httpClient) SetCookieJar(jar http.CookieJar)
+```
+
+<ParamField path="jar" type="http.CookieJar">
+  The new cookie jar to use. Use `tls_client.NewCookieJar()` to create a new empty jar.
+</ParamField>
+
+**Example:**
+
+```go
+// Clear all cookies by setting a new jar
+client.SetCookieJar(tls_client.NewCookieJar())
+```
+
+### GetCookieJar
+
+Returns the client's current cookie jar.
+
+```go
+func (c *httpClient) GetCookieJar() http.CookieJar
+```
+
+<ResponseField name="jar" type="http.CookieJar">
+  The current cookie jar instance.
+</ResponseField>
+
+**Example:**
+
+```go
+jar := client.GetCookieJar()
+if jar != nil {
+    // Save jar to disk, transfer to another client, etc.
+}
+```
+
+## Proxy management
+
+### SetProxy
+
+Configures the client to use the specified proxy URL. The proxy can be changed at runtime.
+
+```go
+func (c *httpClient) SetProxy(proxyUrl string) error
+```
+
+<ParamField path="proxyUrl" type="string">
+  Proxy URL in the format `"http://user:pass@host:port"`. Pass an empty string to disable proxy.
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if the proxy configuration is invalid. On error, the previous proxy configuration is restored.
+</ResponseField>
+
+**Example:**
+
+```go
+// Set proxy with authentication
+err := client.SetProxy("http://username:password@proxy.example.com:8080")
+if err != nil {
+    log.Fatal(err)
+}
+
+// Disable proxy
+err = client.SetProxy("")
+```
+
+### GetProxy
+
+Returns the current proxy URL used by the client.
+
+```go
+func (c *httpClient) GetProxy() string
+```
+
+<ResponseField name="proxyUrl" type="string">
+  The current proxy URL, or empty string if no proxy is configured.
+</ResponseField>
+
+**Example:**
+
+```go
+proxyUrl := client.GetProxy()
+if proxyUrl != "" {
+    fmt.Println("Using proxy:", proxyUrl)
+}
+```
+
+## Redirect control
+
+### SetFollowRedirect
+
+Configures whether the client automatically follows HTTP redirects.
+
+```go
+func (c *httpClient) SetFollowRedirect(followRedirect bool)
+```
+
+<ParamField path="followRedirect" type="bool">
+  `true` to automatically follow redirects, `false` to return redirect responses directly.
+</ParamField>
+
+**Example:**
+
+```go
+// Disable automatic redirect following
+client.SetFollowRedirect(false)
+
+resp, _ := client.Get("https://example.com/redirect")
+if resp.StatusCode == 302 {
+    location := resp.Header.Get("Location")
+    fmt.Println("Redirects to:", location)
+}
+
+// Enable automatic redirect following
+client.SetFollowRedirect(true)
+```
+
+### GetFollowRedirect
+
+Returns the client's current redirect following policy.
+
+```go
+func (c *httpClient) GetFollowRedirect() bool
+```
+
+<ResponseField name="followRedirect" type="bool">
+  `true` if the client follows redirects automatically, `false` otherwise.
+</ResponseField>
+
+**Example:**
+
+```go
+if client.GetFollowRedirect() {
+    fmt.Println("Client follows redirects")
+}
+```
+
+## Connection management
+
+### CloseIdleConnections
+
+Closes all idle (keep-alive) connections that are not currently in use.
+
+```go
+func (c *httpClient) CloseIdleConnections()
+```
+
+**Example:**
+
+```go
+// Close idle connections to free resources
+client.CloseIdleConnections()
+```
+
+## Advanced features
+
+### GetBandwidthTracker
+
+Returns the bandwidth tracker for monitoring network usage. Only available if configured with `WithBandwidthTracker()`.
+
+```go
+func (c *httpClient) GetBandwidthTracker() bandwidth.BandwidthTracker
+```
+
+<ResponseField name="tracker" type="bandwidth.BandwidthTracker">
+  The bandwidth tracker instance, or a no-op tracker if not enabled.
+</ResponseField>
+
+**Example:**
+
+```go
+tracker := client.GetBandwidthTracker()
+
+stats := tracker.GetStats()
+fmt.Printf("Sent: %d bytes, Received: %d bytes\n", stats.Sent, stats.Received)
+```
+
+### GetDialer
+
+Returns the underlying network dialer used by the client.
+
+```go
+func (c *httpClient) GetDialer() proxy.ContextDialer
+```
+
+<ResponseField name="dialer" type="proxy.ContextDialer">
+  The context dialer instance used for establishing connections.
+</ResponseField>
+
+**Example:**
+
+```go
+dialer := client.GetDialer()
+// Use dialer for custom connection logic
+```
+
+### GetTLSDialer
+
+Returns a TLS dialer function that uses the same TLS fingerprinting as regular HTTP requests. Essential for WebSocket connections.
+
+```go
+func (c *httpClient) GetTLSDialer() TLSDialerFunc
+```
+
+<ResponseField name="tlsDialer" type="TLSDialerFunc">
+  A function that dials TLS connections with consistent fingerprinting.
+</ResponseField>
+
+**Type signature:**
+```go
+type TLSDialerFunc func(ctx context.Context, network, addr string) (net.Conn, error)
+```
+
+**Example:**
+
+```go
+tlsDialer := client.GetTLSDialer()
+
+// Used internally by WebSocket connections
+conn, err := tlsDialer(context.Background(), "tcp", "example.com:443")
+```
+
+## Request/response hooks
+
+### AddPreRequestHook
+
+Adds a hook that is called before each request is sent. Multiple hooks can be added and execute in order.
+
+```go
+func (c *httpClient) AddPreRequestHook(hook PreRequestHookFunc)
+```
+
+<ParamField path="hook" type="PreRequestHookFunc">
+  Function to execute before each request. Return an error to abort the request.
+</ParamField>
+
+**Hook signature:**
+```go
+type PreRequestHookFunc func(req *http.Request) error
+```
+
+**Example:**
+
+```go
+// Add custom header to all requests
+client.AddPreRequestHook(func(req *http.Request) error {
+    req.Header.Set("X-Custom-Header", "value")
+    return nil
+})
+
+// Log all requests
+client.AddPreRequestHook(func(req *http.Request) error {
+    log.Printf("Requesting: %s %s", req.Method, req.URL)
+    return nil
+})
+
+// Abort requests to specific domains
+client.AddPreRequestHook(func(req *http.Request) error {
+    if req.URL.Host == "blocked.example.com" {
+        return fmt.Errorf("domain is blocked")
+    }
+    return nil
+})
+```
+
+### AddPostResponseHook
+
+Adds a hook that is called after each request completes. Multiple hooks can be added and execute in order.
+
+```go
+func (c *httpClient) AddPostResponseHook(hook PostResponseHookFunc)
+```
+
+<ParamField path="hook" type="PostResponseHookFunc">
+  Function to execute after each request completes. Always called even if the request failed.
+</ParamField>
+
+**Hook signature:**
+```go
+type PostResponseHookFunc func(ctx *PostResponseContext) error
+
+type PostResponseContext struct {
+    Request  *http.Request
+    Response *http.Response
+    Error    error // Non-nil if request failed
+}
+```
+
+**Example:**
+
+```go
+// Log all responses
+client.AddPostResponseHook(func(ctx *PostResponseContext) error {
+    if ctx.Error != nil {
+        log.Printf("Request failed: %v", ctx.Error)
+    } else {
+        log.Printf("Response: %d from %s", ctx.Response.StatusCode, ctx.Request.URL)
+    }
+    return nil
+})
+
+// Track rate limits
+client.AddPostResponseHook(func(ctx *PostResponseContext) error {
+    if ctx.Response != nil {
+        remaining := ctx.Response.Header.Get("X-RateLimit-Remaining")
+        if remaining == "0" {
+            log.Println("Rate limit exhausted!")
+        }
+    }
+    return nil
+})
+```
+
+### ResetPreHooks
+
+Removes all pre-request hooks.
+
+```go
+func (c *httpClient) ResetPreHooks()
+```
+
+**Example:**
+
+```go
+client.ResetPreHooks()
+```
+
+### ResetPostHooks
+
+Removes all post-response hooks.
+
+```go
+func (c *httpClient) ResetPostHooks()
+```
+
+**Example:**
+
+```go
+client.ResetPostHooks()
+```
+
+## Constants
+
+### DefaultTimeoutSeconds
+
+The default timeout value in seconds.
+
+```go
+var DefaultTimeoutSeconds = 30
+```
+
+### ErrContinueHooks
+
+Special error that can be returned from hooks to log the error but continue execution.
+
+```go
+var ErrContinueHooks = errors.New("continue hooks")
+```
+
+**Example:**
+
+```go
+client.AddPreRequestHook(func(req *http.Request) error {
+    if err := validateRequest(req); err != nil {
+        // Log error but don't abort request
+        return fmt.Errorf("%w: validation failed: %v", tls_client.ErrContinueHooks, err)
+    }
+    return nil
+})
+```

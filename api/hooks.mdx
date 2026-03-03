@@ -1,0 +1,542 @@
+---
+title: Request and response hooks
+description: Execute custom logic before requests and after responses using hooks
+---
+
+## Overview
+
+Hooks allow you to execute custom logic at specific points in the request lifecycle:
+
+- **Pre-request hooks** run before each request is sent
+- **Post-response hooks** run after each request completes (success or failure)
+
+Hooks are useful for logging, metrics collection, request modification, response validation, and implementing custom retry logic.
+
+## Type definitions
+
+### PreRequestHookFunc
+
+```go
+type PreRequestHookFunc func(req *http.Request) error
+```
+
+Called before each request is sent. Return an error to abort the request.
+
+### PostResponseHookFunc
+
+```go
+type PostResponseHookFunc func(ctx *PostResponseContext) error
+```
+
+Called after each request completes, regardless of success or failure.
+
+### PostResponseContext
+
+```go
+type PostResponseContext struct {
+    Request  *http.Request
+    Response *http.Response
+    Error    error // Non-nil if request failed
+}
+```
+
+Contains the request, response, and any error that occurred.
+
+## Error handling
+
+### ErrContinueHooks
+
+```go
+var ErrContinueHooks = errors.New("continue hooks")
+```
+
+Return (or wrap) `ErrContinueHooks` from a hook to log the error but continue executing subsequent hooks:
+
+```go
+func myHook(req *http.Request) error {
+    if err := doSomething(); err != nil {
+        // Log error but continue to next hook
+        return fmt.Errorf("%w: failed to do something: %v", tls_client.ErrContinueHooks, err)
+    }
+    return nil
+}
+```
+
+**Default behavior**: Any error returned from a hook aborts subsequent hooks and the request (for pre-hooks) or stops hook execution (for post-hooks).
+
+## Adding hooks
+
+### At client creation
+
+Add hooks when creating the client:
+
+```go
+client, err := tls_client.NewHttpClient(logger,
+    tls_client.WithPreHook(myPreHook),
+    tls_client.WithPostHook(myPostHook),
+)
+```
+
+### After client creation
+
+Add hooks dynamically using the client methods:
+
+```go
+client.AddPreRequestHook(myPreHook)
+client.AddPostResponseHook(myPostHook)
+```
+
+### Resetting hooks
+
+Remove all hooks:
+
+```go
+client.ResetPreHooks()
+client.ResetPostHooks()
+```
+
+## Execution behavior
+
+### Pre-request hooks
+
+- Execute in the order they were added
+- Run before the HTTP request is sent
+- If any hook returns an error (without `ErrContinueHooks`), the request is aborted
+- Hooks can modify the request object
+- Panics are caught and converted to errors
+
+### Post-response hooks
+
+- Execute in the order they were added
+- Always run, even if the request failed
+- Receive both the response (if available) and any error
+- If any hook returns an error (without `ErrContinueHooks`), subsequent hooks are not executed
+- Panics are caught and logged
+
+## Usage examples
+
+### Request logging
+
+Log all outgoing requests:
+
+```go
+package main
+
+import (
+    "fmt"
+    "time"
+    http "github.com/bogdanfinn/fhttp"
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+func loggingPreHook(req *http.Request) error {
+    fmt.Printf("[%s] %s %s\n",
+        time.Now().Format("15:04:05"),
+        req.Method,
+        req.URL.String(),
+    )
+    return nil
+}
+
+func main() {
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+        tls_client.WithPreHook(loggingPreHook),
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    client.Get("https://example.com")
+    // Output: [14:30:45] GET https://example.com
+}
+```
+
+### Adding custom headers
+
+Automatically add headers to all requests:
+
+```go
+package main
+
+import (
+    http "github.com/bogdanfinn/fhttp"
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+func addAuthHeader(req *http.Request) error {
+    req.Header.Set("Authorization", "Bearer YOUR_TOKEN")
+    req.Header.Set("X-Custom-Header", "custom-value")
+    return nil
+}
+
+func main() {
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+        tls_client.WithPreHook(addAuthHeader),
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    // All requests will include the custom headers
+    client.Get("https://api.example.com/data")
+}
+```
+
+### Request timing
+
+Measure request duration:
+
+```go
+package main
+
+import (
+    "fmt"
+    "time"
+    http "github.com/bogdanfinn/fhttp"
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+var requestTimes = make(map[*http.Request]time.Time)
+
+func timingPreHook(req *http.Request) error {
+    requestTimes[req] = time.Now()
+    return nil
+}
+
+func timingPostHook(ctx *tls_client.PostResponseContext) error {
+    if startTime, ok := requestTimes[ctx.Request]; ok {
+        duration := time.Since(startTime)
+        fmt.Printf("%s took %v\n", ctx.Request.URL.String(), duration)
+        delete(requestTimes, ctx.Request)
+    }
+    return nil
+}
+
+func main() {
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+        tls_client.WithPreHook(timingPreHook),
+        tls_client.WithPostHook(timingPostHook),
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    client.Get("https://example.com")
+    // Output: https://example.com took 245ms
+}
+```
+
+### Response validation
+
+Validate response status codes:
+
+```go
+package main
+
+import (
+    "fmt"
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+func validateStatus(ctx *tls_client.PostResponseContext) error {
+    if ctx.Error != nil {
+        return nil // Request already failed
+    }
+
+    if ctx.Response.StatusCode >= 400 {
+        return fmt.Errorf("request failed with status %d", ctx.Response.StatusCode)
+    }
+
+    return nil
+}
+
+func main() {
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+        tls_client.WithPostHook(validateStatus),
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    resp, err := client.Get("https://example.com/not-found")
+    if err != nil {
+        fmt.Printf("Error: %v\n", err)
+    }
+}
+```
+
+### Retry logic
+
+Implement custom retry logic with exponential backoff:
+
+```go
+package main
+
+import (
+    "fmt"
+    "time"
+    http "github.com/bogdanfinn/fhttp"
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+func makeRequestWithRetry(client tls_client.HttpClient, url string, maxRetries int) (*http.Response, error) {
+    var lastErr error
+    
+    for attempt := 0; attempt <= maxRetries; attempt++ {
+        if attempt > 0 {
+            // Exponential backoff
+            backoff := time.Duration(1<<uint(attempt-1)) * time.Second
+            fmt.Printf("Retrying after %v (attempt %d/%d)\n", backoff, attempt+1, maxRetries+1)
+            time.Sleep(backoff)
+        }
+
+        resp, err := client.Get(url)
+        if err == nil && resp.StatusCode < 500 {
+            return resp, nil
+        }
+
+        lastErr = err
+        if resp != nil {
+            resp.Body.Close()
+        }
+    }
+
+    return nil, fmt.Errorf("failed after %d retries: %w", maxRetries, lastErr)
+}
+
+func main() {
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger())
+    if err != nil {
+        panic(err)
+    }
+
+    resp, err := makeRequestWithRetry(client, "https://api.example.com/data", 3)
+    if err != nil {
+        fmt.Printf("Request failed: %v\n", err)
+    } else {
+        defer resp.Body.Close()
+        fmt.Printf("Success: %d\n", resp.StatusCode)
+    }
+}
+```
+
+### Metrics collection
+
+Collect detailed request metrics:
+
+```go
+package main
+
+import (
+    "fmt"
+    "sync/atomic"
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+type Metrics struct {
+    totalRequests   atomic.Int64
+    successRequests atomic.Int64
+    failedRequests  atomic.Int64
+}
+
+func (m *Metrics) recordRequest(ctx *tls_client.PostResponseContext) error {
+    m.totalRequests.Add(1)
+    
+    if ctx.Error != nil || (ctx.Response != nil && ctx.Response.StatusCode >= 400) {
+        m.failedRequests.Add(1)
+    } else {
+        m.successRequests.Add(1)
+    }
+    
+    return nil
+}
+
+func (m *Metrics) Print() {
+    total := m.totalRequests.Load()
+    success := m.successRequests.Load()
+    failed := m.failedRequests.Load()
+    
+    fmt.Printf("\nMetrics:\n")
+    fmt.Printf("  Total: %d\n", total)
+    fmt.Printf("  Success: %d (%.1f%%)\n", success, float64(success)/float64(total)*100)
+    fmt.Printf("  Failed: %d (%.1f%%)\n", failed, float64(failed)/float64(total)*100)
+}
+
+func main() {
+    metrics := &Metrics{}
+
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+        tls_client.WithPostHook(metrics.recordRequest),
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    // Make some requests
+    urls := []string{
+        "https://example.com",
+        "https://example.com/not-found",
+        "https://example.com/about",
+    }
+
+    for _, url := range urls {
+        resp, err := client.Get(url)
+        if err == nil {
+            resp.Body.Close()
+        }
+    }
+
+    metrics.Print()
+}
+```
+
+### Request rate limiting
+
+Implement simple rate limiting:
+
+```go
+package main
+
+import (
+    "fmt"
+    "sync"
+    "time"
+    http "github.com/bogdanfinn/fhttp"
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+type RateLimiter struct {
+    requests      int
+    window        time.Duration
+    maxRequests   int
+    mutex         sync.Mutex
+    windowStart   time.Time
+    requestCount  int
+}
+
+func NewRateLimiter(maxRequests int, window time.Duration) *RateLimiter {
+    return &RateLimiter{
+        maxRequests: maxRequests,
+        window:      window,
+        windowStart: time.Now(),
+    }
+}
+
+func (rl *RateLimiter) PreHook(req *http.Request) error {
+    rl.mutex.Lock()
+    defer rl.mutex.Unlock()
+
+    now := time.Now()
+    
+    // Reset window if expired
+    if now.Sub(rl.windowStart) >= rl.window {
+        rl.windowStart = now
+        rl.requestCount = 0
+    }
+
+    // Check if limit exceeded
+    if rl.requestCount >= rl.maxRequests {
+        sleepTime := rl.window - now.Sub(rl.windowStart)
+        fmt.Printf("Rate limit reached, sleeping for %v\n", sleepTime)
+        time.Sleep(sleepTime)
+        
+        // Reset after sleep
+        rl.windowStart = time.Now()
+        rl.requestCount = 0
+    }
+
+    rl.requestCount++
+    return nil
+}
+
+func main() {
+    // Allow max 5 requests per 10 seconds
+    rateLimiter := NewRateLimiter(5, 10*time.Second)
+
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+        tls_client.WithPreHook(rateLimiter.PreHook),
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    // Make 10 requests - should trigger rate limiting
+    for i := 0; i < 10; i++ {
+        fmt.Printf("Request %d\n", i+1)
+        resp, err := client.Get("https://example.com")
+        if err == nil {
+            resp.Body.Close()
+        }
+    }
+}
+```
+
+### Continue on error
+
+Use `ErrContinueHooks` to log errors without aborting:
+
+```go
+package main
+
+import (
+    "fmt"
+    http "github.com/bogdanfinn/fhttp"
+    tls_client "github.com/bogdanfinn/tls-client"
+)
+
+func optionalValidation(req *http.Request) error {
+    if req.Header.Get("X-Required-Header") == "" {
+        // Log warning but continue with request
+        return fmt.Errorf("%w: missing X-Required-Header", tls_client.ErrContinueHooks)
+    }
+    return nil
+}
+
+func criticalValidation(req *http.Request) error {
+    if req.URL.Scheme != "https" {
+        // Abort request
+        return fmt.Errorf("only HTTPS requests allowed")
+    }
+    return nil
+}
+
+func main() {
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+        tls_client.WithPreHook(optionalValidation),
+        tls_client.WithPreHook(criticalValidation),
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    // This will log a warning but proceed
+    resp, err := client.Get("https://example.com")
+    if err == nil {
+        resp.Body.Close()
+    }
+
+    // This will abort due to critical validation
+    resp, err = client.Get("http://example.com")
+    if err != nil {
+        fmt.Printf("Request blocked: %v\n", err)
+    }
+}
+```
+
+## Best practices
+
+1. **Keep hooks lightweight**: Hooks execute synchronously and block the request
+2. **Handle errors gracefully**: Use `ErrContinueHooks` for non-critical errors
+3. **Avoid panics**: Hooks catch panics, but they still abort the request
+4. **Thread safety**: Use proper synchronization for shared state (see rate limiter example)
+5. **Clean up resources**: Store request-specific data in maps and clean up in post-hooks
+6. **Order matters**: Hooks execute in the order they were added
+
+## Related methods
+
+- [`WithPreHook()`](/api/client-options#withprehook) - Add pre-request hook at client creation
+- [`WithPostHook()`](/api/client-options#withposthook) - Add post-response hook at client creation  
+- [`HttpClient.AddPreRequestHook()`](/api/http-client#addprerequesthook) - Add pre-request hook dynamically
+- [`HttpClient.AddPostResponseHook()`](/api/http-client#addpostresponsehook) - Add post-response hook dynamically
+- [`HttpClient.ResetPreHooks()`](/api/http-client#resetprehooks) - Remove all pre-request hooks
+- [`HttpClient.ResetPostHooks()`](/api/http-client#resetposthooks) - Remove all post-response hooks

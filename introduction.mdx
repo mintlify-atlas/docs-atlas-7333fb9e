@@ -1,0 +1,189 @@
+---
+title: Introduction
+description: A Go HTTP client library with TLS fingerprinting that mimics real browsers
+---
+
+<img
+  className="block dark:hidden"
+  src="/images/hero-light.svg"
+  alt="TLS Client Hero Light"
+/>
+<img
+  className="hidden dark:block"
+  src="/images/hero-dark.svg"
+  alt="TLS Client Hero Dark"
+/>
+
+## What is TLS Client?
+
+TLS Client is a powerful Go HTTP client library built on top of [fhttp](https://github.com/bogdanfinn/fhttp) and [utls](https://github.com/bogdanfinn/utls) that allows you to make HTTP requests while mimicking the TLS fingerprint of real browsers like Chrome, Firefox, and Safari.
+
+Some people think it's enough to change the user-agent header of a request to make the server think the client is a specific browser. Nowadays this is not enough, because servers use a technique called **TLS fingerprinting** to detect the actual client.
+
+## Why TLS fingerprinting matters
+
+When your application makes an HTTPS request, the TLS handshake reveals unique characteristics about your client:
+- Cipher suites in use
+- TLS extensions and their order
+- Supported curves and signature algorithms
+- HTTP/2 and HTTP/3 settings
+
+Servers can analyze these patterns to detect bots and automated clients, even if you set the correct user-agent header. TLS Client solves this by allowing you to specify which browser profile to mimic, making your requests indistinguishable from real browser traffic.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card
+    title="Protocol support"
+    icon="network-wired"
+  >
+    Full support for HTTP/1.1, HTTP/2, and HTTP/3 with automatic protocol negotiation and Chrome-like protocol racing.
+  </Card>
+  <Card
+    title="TLS fingerprinting"
+    icon="fingerprint"
+  >
+    Mimic Chrome, Firefox, Safari, and other browsers with accurate TLS and HTTP/2 fingerprints.
+  </Card>
+  <Card
+    title="WebSocket support"
+    icon="comments"
+  >
+    Maintain TLS fingerprinting over WebSocket connections for real-time communication.
+  </Card>
+  <Card
+    title="Advanced features"
+    icon="cog"
+  >
+    Custom header ordering, certificate pinning, bandwidth tracking, proxy support, and more.
+  </Card>
+</CardGroup>
+
+## Feature highlights
+
+<AccordionGroup>
+  <Accordion title="Multiple protocol support">
+    - **HTTP/1.1, HTTP/2, HTTP/3** - Full protocol support with automatic negotiation
+    - **Protocol racing** - Chrome-like "Happy Eyeballs" for HTTP/2 vs HTTP/3
+    - **Force HTTP/1** - Option to disable HTTP/2 and HTTP/3 when needed
+  </Accordion>
+
+  <Accordion title="TLS and fingerprinting">
+    - **Browser profiles** - Pre-configured profiles for Chrome, Firefox, Safari, and more
+    - **HTTP/3 fingerprinting** - Accurate QUIC/HTTP/3 fingerprints matching real browsers
+    - **Custom profiles** - Create custom TLS fingerprints with JA3 strings
+    - **Random extension order** - Randomize TLS extension order for additional variance
+  </Accordion>
+
+  <Accordion title="Connection management">
+    - **Cookie jar management** - Built-in cookie handling and persistence
+    - **Proxy support** - HTTP and SOCKS5 proxies with authentication
+    - **Certificate pinning** - Enhanced security with custom certificate validation
+    - **Connection pooling** - Efficient connection reuse and management
+  </Accordion>
+
+  <Accordion title="Developer experience">
+    - **Language bindings** - Use from JavaScript (Node.js), Python, and C# via FFI
+    - **Custom header ordering** - Control the exact order of HTTP headers
+    - **Bandwidth tracking** - Monitor upload and download bandwidth
+    - **Debug mode** - Detailed logging for troubleshooting
+  </Accordion>
+</AccordionGroup>
+
+## Use cases
+
+- **Web scraping** - Bypass basic bot detection by mimicking real browsers
+- **API testing** - Test how your APIs respond to different browser clients
+- **Security research** - Analyze TLS fingerprinting and antibot systems
+- **Automation** - Build reliable automation tools that don't get blocked
+- **Load testing** - Test your infrastructure with realistic browser traffic
+
+## Get started
+
+<CardGroup cols={2}>
+  <Card
+    title="Quickstart"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Get up and running with your first request in under 5 minutes.
+  </Card>
+  <Card
+    title="Installation"
+    icon="download"
+    href="/installation"
+  >
+    Install TLS Client for Go or use language bindings for Node.js, Python, or C#.
+  </Card>
+  <Card
+    title="Configuration"
+    icon="sliders"
+    href="/guides/client-options"
+  >
+    Learn how to configure client options, timeouts, proxies, and more.
+  </Card>
+  <Card
+    title="Browser profiles"
+    icon="browser"
+    href="/concepts/client-profiles"
+  >
+    Explore available browser profiles and learn how to create custom ones.
+  </Card>
+</CardGroup>
+
+## Example
+
+Here's a quick example of making a request with TLS Client:
+
+```go
+package main
+
+import (
+    "fmt"
+    "io"
+    "log"
+
+    http "github.com/bogdanfinn/fhttp"
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+)
+
+func main() {
+    jar := tls_client.NewCookieJar()
+    options := []tls_client.HttpClientOption{
+        tls_client.WithTimeoutSeconds(30),
+        tls_client.WithClientProfile(profiles.Chrome_144),
+        tls_client.WithCookieJar(jar),
+    }
+
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    resp, err := client.Get("https://tls.peet.ws/api/all")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer resp.Body.Close()
+
+    body, _ := io.ReadAll(resp.Body)
+    fmt.Printf("Status: %d\n%s\n", resp.StatusCode, body)
+}
+```
+
+<Note>
+  TLS fingerprinting alone isn't enough for modern bot protection systems like Cloudflare, DataDome, or Akamai. For production use cases requiring antibot bypass, consider services like [Hyper Solutions](https://hypersolutions.co).
+</Note>
+
+## Community and support
+
+Join the community and get help:
+
+- **Discord** - [Join the support server](https://discord.gg/7Ej9eJvHqk) for questions and discussions
+- **GitHub** - [Report issues](https://github.com/bogdanfinn/tls-client/issues) or contribute to the project
+- **Documentation** - [Full documentation](https://bogdanfinn.gitbook.io/open-source-oasis/) with detailed guides
+
+<Warning>
+  No support in DMs! Please use the Discord server or GitHub issues for support.
+</Warning>

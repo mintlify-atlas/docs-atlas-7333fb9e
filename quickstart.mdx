@@ -1,80 +1,316 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get started with TLS Client in under 5 minutes
 ---
 
-## Get started in three steps
+## Make your first request
 
-Get your documentation site running locally and make your first customization.
+This guide will walk you through installing TLS Client and making your first HTTP request with TLS fingerprinting.
 
-### Step 1: Set up your local environment
+<Steps>
+  <Step title="Install TLS Client">
+    Add TLS Client to your Go project:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+    ```bash
+    go get github.com/bogdanfinn/tls-client
+    ```
+
+    This will also install the required dependencies:
+    - `github.com/bogdanfinn/fhttp` - Fork of net/http with TLS fingerprinting support
+    - `github.com/bogdanfinn/utls` - TLS library for client fingerprinting
+  </Step>
+
+  <Step title="Create a basic client">
+    Create a new file `main.go` with the following code:
+
+    ```go main.go
+    package main
+
+    import (
+        "fmt"
+        "io"
+        "log"
+
+        http "github.com/bogdanfinn/fhttp"
+        tls_client "github.com/bogdanfinn/tls-client"
+        "github.com/bogdanfinn/tls-client/profiles"
+    )
+
+    func main() {
+        // Create a cookie jar for automatic cookie handling
+        jar := tls_client.NewCookieJar()
+        
+        // Configure client options
+        options := []tls_client.HttpClientOption{
+            tls_client.WithTimeoutSeconds(30),
+            tls_client.WithClientProfile(profiles.Chrome_144),
+            tls_client.WithCookieJar(jar),
+        }
+
+        // Create the client
+        client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+        if err != nil {
+            log.Fatal(err)
+        }
+
+        // Make a request
+        resp, err := client.Get("https://tls.peet.ws/api/all")
+        if err != nil {
+            log.Fatal(err)
+        }
+        defer resp.Body.Close()
+
+        // Read the response
+        body, _ := io.ReadAll(resp.Body)
+        fmt.Printf("Status: %d\n%s\n", resp.StatusCode, body)
+    }
+    ```
+
+    <Note>
+      We're using `profiles.Chrome_144` to mimic Chrome 144's TLS fingerprint. See [Browser Profiles](/concepts/client-profiles) for all available profiles.
+    </Note>
+  </Step>
+
+  <Step title="Run your code">
+    Run your program:
+
+    ```bash
+    go run main.go
+    ```
+
+    You should see a successful response with status 200 and JSON output containing your TLS fingerprint details.
+  </Step>
+</Steps>
+
+## Make a POST request
+
+Here's how to make a POST request with custom headers:
+
+```go
+package main
+
+import (
+    "log"
+    "net/url"
+    "strings"
+
+    http "github.com/bogdanfinn/fhttp"
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+)
+
+func main() {
+    options := []tls_client.HttpClientOption{
+        tls_client.WithTimeoutSeconds(30),
+        tls_client.WithClientProfile(profiles.Chrome_144),
+    }
+
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Prepare form data
+    postData := url.Values{}
+    postData.Add("username", "john")
+    postData.Add("password", "secret123")
+
+    // Create request
+    req, err := http.NewRequest(
+        http.MethodPost,
+        "https://example.com/api/login",
+        strings.NewReader(postData.Encode()),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Set headers with custom order
+    req.Header = http.Header{
+        "content-type":    {"application/x-www-form-urlencoded"},
+        "accept":          {"application/json"},
+        "accept-language": {"en-US,en;q=0.9"},
+        "user-agent":      {"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+        http.HeaderOrderKey: {
+            "content-type",
+            "accept",
+            "accept-language",
+            "user-agent",
+        },
+    }
+
+    // Execute request
+    resp, err := client.Do(req)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer resp.Body.Close()
+
+    log.Printf("Status: %d", resp.StatusCode)
+}
+```
+
+<Warning>
+  Header names in `HeaderOrderKey` must be lowercase. TLS Client will automatically convert them to ensure proper ordering.
+</Warning>
+
+## Use with proxies
+
+TLS Client supports HTTP and SOCKS5 proxies:
+
+```go
+options := []tls_client.HttpClientOption{
+    tls_client.WithTimeoutSeconds(30),
+    tls_client.WithClientProfile(profiles.Chrome_144),
+    tls_client.WithProxyUrl("http://user:pass@proxy.example.com:8080"),
+}
+
+client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+```
+
+<CodeGroup>
+
+```go HTTP proxy
+tls_client.WithProxyUrl("http://user:pass@proxy.example.com:8080")
+```
+
+```go SOCKS5 proxy
+tls_client.WithProxyUrl("socks5://user:pass@proxy.example.com:1080")
+```
+
+```go SOCKS5h proxy (DNS over SOCKS)
+tls_client.WithProxyUrl("socks5h://user:pass@proxy.example.com:1080")
+```
+
+</CodeGroup>
+
+You can also change the proxy at runtime:
+
+```go
+err := client.SetProxy("http://user:pass@newproxy.example.com:8080")
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+## Control redirects
+
+By default, TLS Client follows redirects automatically. You can disable this:
+
+```go
+options := []tls_client.HttpClientOption{
+    tls_client.WithTimeoutSeconds(30),
+    tls_client.WithClientProfile(profiles.Chrome_144),
+    tls_client.WithNotFollowRedirects(),
+}
+
+client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+```
+
+Or toggle it at runtime:
+
+```go
+// Disable redirect following
+client.SetFollowRedirect(false)
+
+// Re-enable it
+client.SetFollowRedirect(true)
+```
+
+## Enable debug logging
+
+For debugging, you can enable detailed logging:
+
+```go
+options := []tls_client.HttpClientOption{
+    tls_client.WithTimeoutSeconds(30),
+    tls_client.WithClientProfile(profiles.Chrome_144),
+    tls_client.WithDebug(),
+}
+
+client, err := tls_client.NewHttpClient(tls_client.NewLogger(), options...)
+```
+
+This will log:
+- Request and response headers
+- Cookie operations
+- Raw bytes sent and received over the wire
+- TLS handshake details
+
+## Manage cookies
+
+TLS Client includes built-in cookie jar support:
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+    "net/url"
+
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+)
+
+func main() {
+    jar := tls_client.NewCookieJar()
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    options := []tls_client.HttpClientOption{
+        tls_client.WithTimeoutSeconds(30),
+        tls_client.WithClientProfile(profiles.Chrome_144),
+        tls_client.WithCookieJar(jar),
+    }
+
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Make a request - cookies are automatically stored
+    resp, err := client.Get("https://example.com")
+    if err != nil {
+        log.Fatal(err)
+    }
+    resp.Body.Close()
+
+    // Get cookies for a URL
+    u, _ := url.Parse("https://example.com")
+    cookies := client.GetCookies(u)
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    fmt.Printf("Cookies: %v\n", cookies)
+}
+```
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card
+    title="Configuration"
+    icon="sliders"
+    href="/guides/client-options"
+  >
+    Learn about all available client options and how to configure them.
+  </Card>
+  <Card
+    title="Browser profiles"
+    icon="browser"
+    href="/concepts/client-profiles"
+  >
+    Explore all available browser profiles and create custom ones.
+  </Card>
+  <Card
+    title="Advanced usage"
+    icon="code"
+    href="/guides/certificate-pinning"
+  >
+    Certificate pinning, bandwidth tracking, WebSockets, and more.
+  </Card>
+  <Card
+    title="Language bindings"
+    icon="layer-group"
+    href="/language-bindings"
+  >
+    Use TLS Client from Node.js, Python, or C# via FFI.
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

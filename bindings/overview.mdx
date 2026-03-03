@@ -1,0 +1,179 @@
+---
+title: FFI bindings overview
+description: Understanding the FFI interface and how language bindings work
+---
+
+The TLS Client library exposes a Foreign Function Interface (FFI) that allows you to use it from multiple programming languages including Node.js, Python, C#, and more.
+
+## How FFI bindings work
+
+The TLS Client is written in Go and compiled into a shared library that exposes C-compatible functions. These functions can be called from other languages using their respective FFI mechanisms:
+
+- **Node.js**: Uses `ffi-napi` to load and call shared library functions
+- **Python**: Uses `ctypes` to interface with the shared library
+- **C#**: Uses `DllImport` attributes for native interop
+
+## Available functions
+
+The FFI interface exposes the following functions:
+
+### request
+
+Makes an HTTP request with custom TLS configuration.
+
+**Parameters**: JSON string containing request configuration
+
+**Returns**: JSON string with response data
+
+### getCookiesFromSession
+
+Retrieves cookies from a specific session.
+
+**Parameters**: JSON string with `sessionId` and `url`
+
+**Returns**: JSON string with cookies array
+
+### addCookiesToSession
+
+Adds cookies to a session's cookie jar.
+
+**Parameters**: JSON string with `sessionId`, `url`, and `cookies` array
+
+**Returns**: JSON string with updated cookies
+
+### destroySession
+
+Destroys a specific session and frees its resources.
+
+**Parameters**: JSON string with `sessionId`
+
+**Returns**: JSON string with success status
+
+### destroyAll
+
+Destroys all sessions and clears the session cache.
+
+**Parameters**: None
+
+**Returns**: JSON string with success status
+
+### freeMemory
+
+Frees memory allocated for a response.
+
+**Parameters**: Response ID string
+
+**Returns**: None
+
+## Request format
+
+All requests are sent as JSON strings with the following structure:
+
+```json
+{
+  "tlsClientIdentifier": "chrome_105",
+  "followRedirects": false,
+  "insecureSkipVerify": false,
+  "withoutCookieJar": false,
+  "withCustomCookieJar": false,
+  "isByteRequest": false,
+  "forceHttp1": false,
+  "withDebug": false,
+  "catchPanics": false,
+  "withRandomTLSExtensionOrder": false,
+  "timeoutSeconds": 30,
+  "timeoutMilliseconds": 0,
+  "sessionId": "my-session-id",
+  "proxyUrl": "",
+  "isRotatingProxy": false,
+  "certificatePinningHosts": {},
+  "headers": {
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+  },
+  "headerOrder": [
+    "accept",
+    "user-agent"
+  ],
+  "requestUrl": "https://example.com",
+  "requestMethod": "GET",
+  "requestBody": "",
+  "requestCookies": []
+}
+```
+
+## Response format
+
+Responses are returned as JSON strings with the following structure:
+
+```json
+{
+  "id": "response-uuid",
+  "status": 200,
+  "body": "response body content",
+  "headers": {
+    "content-type": ["text/html; charset=utf-8"],
+    "content-length": ["1234"]
+  },
+  "cookies": [
+    {
+      "name": "session",
+      "value": "abc123",
+      "domain": "example.com",
+      "path": "/",
+      "expires": "2024-12-31T23:59:59Z",
+      "maxAge": 3600,
+      "secure": true,
+      "httpOnly": true
+    }
+  ],
+  "sessionId": "my-session-id",
+  "target": "https://example.com",
+  "usedProtocol": "h2"
+}
+```
+
+## Error handling
+
+When an error occurs, the response will have a `status` of `0` and the error message will be in the `body` field:
+
+```json
+{
+  "id": "response-uuid",
+  "status": 0,
+  "body": "error message here",
+  "headers": null,
+  "cookies": null
+}
+```
+
+## Memory management
+
+The FFI interface allocates memory for responses that must be freed to prevent memory leaks. Always call `freeMemory` with the response ID after processing each response:
+
+1. Make a request and receive a response
+2. Parse the JSON response
+3. Extract the `id` field
+4. Call `freeMemory(id)` to free allocated memory
+
+## Sessions
+
+Sessions allow you to maintain state across multiple requests, including:
+
+- Cookie jars for automatic cookie management
+- Connection pooling for better performance
+- TLS session resumption
+
+To use sessions:
+
+1. Include a `sessionId` in your request payload
+2. Use the same `sessionId` for subsequent requests
+3. Call `destroySession` when done to free resources
+
+## Next steps
+
+See the language-specific guides for detailed examples:
+
+- [Node.js usage](/bindings/nodejs)
+- [Python usage](/bindings/python)
+- [C# usage](/bindings/csharp)

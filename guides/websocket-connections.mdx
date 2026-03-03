@@ -1,0 +1,463 @@
+---
+title: WebSocket connections
+description: Use WebSocket connections with TLS fingerprinting to maintain consistent browser fingerprints
+---
+
+The TLS Client supports WebSocket connections that maintain the same TLS fingerprinting as regular HTTP requests. This ensures WebSocket handshakes appear identical to real browsers.
+
+## Why WebSocket with TLS Client?
+
+Standard WebSocket libraries don't support TLS fingerprinting, which can expose your bot. The TLS Client's WebSocket implementation:
+
+- Maintains the same TLS fingerprint as your HTTP client
+- Supports custom header ordering for the WebSocket handshake
+- Uses the same proxy and network configuration
+- Preserves cookie jar state
+
+## Basic WebSocket connection
+
+<Steps>
+
+### Create an HTTP client with HTTP/1.1
+
+WebSocket requires HTTP/1.1, so you must force HTTP/1:
+
+```go
+import (
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+)
+
+options := []tls_client.HttpClientOption{
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithForceHttp1(),  // Required for WebSocket!
+    tls_client.WithTimeoutSeconds(30),
+}
+
+client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+### Create a WebSocket with TLS Client
+
+```go
+import (
+    "context"
+    
+    http "github.com/bogdanfinn/fhttp"
+    "github.com/bogdanfinn/websocket"
+)
+
+websocketOptions := []tls_client.WebsocketOption{
+    tls_client.WithTlsClient(client),
+    tls_client.WithUrl("wss://echo.websocket.org"),
+}
+
+ws, err := tls_client.NewWebsocket(tls_client.NewNoopLogger(), websocketOptions...)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+### Connect and use the WebSocket
+
+```go
+ctx := context.Background()
+conn, err := ws.Connect(ctx)
+if err != nil {
+    log.Fatal(err)
+}
+defer conn.Close()
+
+// Send a message
+err = conn.WriteMessage(websocket.TextMessage, []byte("Hello, WebSocket!"))
+if err != nil {
+    log.Fatal(err)
+}
+
+// Read a message
+messageType, message, err := conn.ReadMessage()
+if err != nil {
+    log.Fatal(err)
+}
+
+log.Printf("Received: %s", string(message))
+```
+
+</Steps>
+
+<Warning>
+You must use `WithForceHttp1()` when creating the HTTP client. WebSocket connections only work over HTTP/1.1, not HTTP/2 or HTTP/3.
+</Warning>
+
+## Custom WebSocket headers
+
+Control the exact headers and their order in the WebSocket handshake:
+
+```go
+import http "github.com/bogdanfinn/fhttp"
+
+headers := http.Header{
+    "User-Agent":    {"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"},
+    "Origin":        {"https://example.com"},
+    "Custom-Header": {"custom-value"},
+    http.HeaderOrderKey: {
+        "host",
+        "upgrade",
+        "connection",
+        "sec-websocket-key",
+        "sec-websocket-version",
+        "origin",
+        "user-agent",
+        "custom-header",
+    },
+}
+
+websocketOptions := []tls_client.WebsocketOption{
+    tls_client.WithTlsClient(client),
+    tls_client.WithUrl("wss://api.example.com/ws"),
+    tls_client.WithHeaders(headers),
+}
+
+ws, err := tls_client.NewWebsocket(tls_client.NewNoopLogger(), websocketOptions...)
+```
+
+<Note>
+Standard WebSocket headers like `Upgrade`, `Connection`, `Sec-WebSocket-Key`, and `Sec-WebSocket-Version` are automatically added if not present.
+</Note>
+
+## WebSocket configuration options
+
+### Handshake timeout
+
+Set a timeout for the WebSocket handshake:
+
+```go
+tls_client.WithHandshakeTimeoutMilliseconds(5000)  // 5 seconds
+```
+
+### Buffer sizes
+
+Configure read and write buffer sizes:
+
+```go
+tls_client.WithReadBufferSize(4096)   // 4KB read buffer
+tls_client.WithWriteBufferSize(4096)  // 4KB write buffer
+```
+
+### Cookie jar
+
+Share cookies between HTTP and WebSocket connections:
+
+```go
+jar := tls_client.NewCookieJar()
+
+// Use jar in HTTP client
+httpClient, _ := tls_client.NewHttpClient(
+    tls_client.NewNoopLogger(),
+    tls_client.WithCookieJar(jar),
+    tls_client.WithForceHttp1(),
+)
+
+// Use same jar in WebSocket
+websocketOptions := []tls_client.WebsocketOption{
+    tls_client.WithTlsClient(httpClient),
+    tls_client.WithUrl("wss://api.example.com/ws"),
+    tls_client.WithCookiejar(jar),  // Same jar
+}
+```
+
+## Complete example with authentication
+
+A real-world example showing authentication followed by WebSocket connection:
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "time"
+
+    http "github.com/bogdanfinn/fhttp"
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+    "github.com/bogdanfinn/websocket"
+)
+
+func main() {
+    // Create HTTP client with cookie jar
+    jar := tls_client.NewCookieJar()
+    
+    options := []tls_client.HttpClientOption{
+        tls_client.WithClientProfile(profiles.Chrome_133),
+        tls_client.WithForceHttp1(),
+        tls_client.WithTimeoutSeconds(30),
+        tls_client.WithCookieJar(jar),
+    }
+    
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Step 1: Authenticate via HTTP
+    loginReq, err := http.NewRequest(
+        http.MethodPost,
+        "https://api.example.com/auth/login",
+        strings.NewReader(`{"username":"user","password":"pass"}`),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    loginReq.Header.Set("Content-Type", "application/json")
+    
+    loginResp, err := client.Do(loginReq)
+    if err != nil {
+        log.Fatal(err)
+    }
+    loginResp.Body.Close()
+    
+    log.Println("Authenticated successfully")
+
+    // Step 2: Connect via WebSocket (cookies are automatically included)
+    wsHeaders := http.Header{
+        "User-Agent": {"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"},
+        http.HeaderOrderKey: {
+            "host",
+            "upgrade",
+            "connection",
+            "sec-websocket-key",
+            "sec-websocket-version",
+            "user-agent",
+        },
+    }
+    
+    websocketOptions := []tls_client.WebsocketOption{
+        tls_client.WithTlsClient(client),
+        tls_client.WithUrl("wss://api.example.com/ws"),
+        tls_client.WithHeaders(wsHeaders),
+        tls_client.WithHandshakeTimeoutMilliseconds(5000),
+    }
+    
+    ws, err := tls_client.NewWebsocket(tls_client.NewNoopLogger(), websocketOptions...)
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    ctx := context.Background()
+    conn, err := ws.Connect(ctx)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer conn.Close()
+    
+    log.Println("WebSocket connected")
+
+    // Step 3: Send and receive messages
+    err = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"subscribe","channel":"updates"}`))
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Set read deadline
+    conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+    
+    // Read messages in a loop
+    for {
+        messageType, message, err := conn.ReadMessage()
+        if err != nil {
+            log.Printf("Read error: %v", err)
+            break
+        }
+        
+        if messageType == websocket.TextMessage {
+            log.Printf("Received: %s", string(message))
+        }
+        
+        // Send ping to keep connection alive
+        if time.Since(lastPing) > 30*time.Second {
+            conn.WriteMessage(websocket.PingMessage, []byte{})
+            lastPing = time.Now()
+        }
+    }
+}
+```
+
+## Message types
+
+The WebSocket client supports different message types:
+
+```go
+// Text message
+conn.WriteMessage(websocket.TextMessage, []byte("Hello"))
+
+// Binary message
+conn.WriteMessage(websocket.BinaryMessage, data)
+
+// Ping message (keep-alive)
+conn.WriteMessage(websocket.PingMessage, []byte{})
+
+// Pong message (response to ping)
+conn.WriteMessage(websocket.PongMessage, []byte{})
+
+// Close message
+conn.WriteMessage(websocket.CloseMessage, []byte{})
+```
+
+## Reading messages
+
+### Blocking read
+
+```go
+messageType, message, err := conn.ReadMessage()
+if err != nil {
+    log.Printf("Read error: %v", err)
+    return
+}
+
+switch messageType {
+case websocket.TextMessage:
+    log.Printf("Text: %s", string(message))
+case websocket.BinaryMessage:
+    log.Printf("Binary: %d bytes", len(message))
+case websocket.CloseMessage:
+    log.Println("Connection closed by server")
+}
+```
+
+### With timeout
+
+```go
+import "time"
+
+conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+messageType, message, err := conn.ReadMessage()
+if err != nil {
+    if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+        log.Println("Read timeout")
+    } else {
+        log.Printf("Read error: %v", err)
+    }
+    return
+}
+```
+
+## Proxy support
+
+WebSocket connections automatically use the proxy configured in the HTTP client:
+
+```go
+options := []tls_client.HttpClientOption{
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithForceHttp1(),
+    tls_client.WithProxyUrl("http://user:pass@proxy.example.com:8080"),
+}
+
+client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+
+// WebSocket will use the proxy automatically
+websocketOptions := []tls_client.WebsocketOption{
+    tls_client.WithTlsClient(client),
+    tls_client.WithUrl("wss://api.example.com/ws"),
+}
+
+ws, err := tls_client.NewWebsocket(tls_client.NewNoopLogger(), websocketOptions...)
+```
+
+## Closing connections
+
+Always close WebSocket connections properly:
+
+```go
+// Graceful close with close message
+closeMessage := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Goodbye")
+conn.WriteMessage(websocket.CloseMessage, closeMessage)
+
+// Close the connection
+conn.Close()
+```
+
+Or use defer for automatic cleanup:
+
+```go
+conn, err := ws.Connect(ctx)
+if err != nil {
+    log.Fatal(err)
+}
+defer conn.Close()
+
+// Use connection...
+```
+
+## Error handling
+
+Handle common WebSocket errors:
+
+```go
+messageType, message, err := conn.ReadMessage()
+if err != nil {
+    if websocket.IsUnexpectedCloseError(err, 
+        websocket.CloseGoingAway, 
+        websocket.CloseAbnormalClosure) {
+        log.Printf("Unexpected close: %v", err)
+    } else if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
+        log.Println("Normal close")
+    } else {
+        log.Printf("Read error: %v", err)
+    }
+    return
+}
+```
+
+## Best practices
+
+<Steps>
+
+### Always use ForceHttp1
+
+WebSocket only works over HTTP/1.1. Always include `WithForceHttp1()` in your client options.
+
+### Share the cookie jar
+
+Use the same cookie jar for both HTTP and WebSocket to maintain authentication state.
+
+### Set appropriate timeouts
+
+Use `SetReadDeadline()` and `SetWriteDeadline()` to prevent hanging connections:
+
+```go
+conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+```
+
+### Implement ping/pong
+
+Send periodic ping messages to keep the connection alive:
+
+```go
+ticker := time.NewTicker(30 * time.Second)
+defer ticker.Stop()
+
+go func() {
+    for range ticker.C {
+        conn.WriteMessage(websocket.PingMessage, []byte{})
+    }
+}()
+```
+
+</Steps>
+
+<Tip>
+Use the same TLS client profile for both HTTP and WebSocket to ensure consistent fingerprinting throughout your session.
+</Tip>
+
+## Next steps
+
+- Learn about [client options](/guides/client-options) for HTTP/1.1 configuration
+- Set up [proxy configuration](/guides/proxy-configuration) for WebSocket
+- Manage [cookies](/guides/cookie-management) across HTTP and WebSocket

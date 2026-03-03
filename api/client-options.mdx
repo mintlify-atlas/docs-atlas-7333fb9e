@@ -1,0 +1,853 @@
+---
+title: Client options
+description: Configuration options for customizing HttpClient behavior
+---
+
+All client options follow the functional options pattern and can be passed to `NewHttpClient()`.
+
+## Basic configuration
+
+### WithClientProfile
+
+Configures the TLS client profile to use for fingerprinting.
+
+```go
+func WithClientProfile(clientProfile profiles.ClientProfile) HttpClientOption
+```
+
+<ParamField path="clientProfile" type="profiles.ClientProfile">
+  The browser or client profile to mimic. See [Client profiles](/concepts/client-profiles) for available options.
+</ParamField>
+
+**Example:**
+
+```go
+import "github.com/bogdanfinn/tls-client/profiles"
+
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithClientProfile(profiles.Chrome_133),
+)
+```
+
+### WithTimeoutSeconds
+
+Configures a hard deadline for the entire request lifecycle in seconds.
+
+```go
+func WithTimeoutSeconds(timeout int) HttpClientOption
+```
+
+<ParamField path="timeout" type="int">
+  Request timeout in seconds. Use `0` to disable the timeout (unlimited). Default is `30` seconds.
+</ParamField>
+
+<Warning>
+  If the timer expires, the connection is forcibly closed even during active downloads. Use `0` for large downloads or long-polling.
+</Warning>
+
+**Example:**
+
+```go
+// 60 second timeout
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithTimeoutSeconds(60),
+)
+
+// No timeout (unlimited)
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithTimeoutSeconds(0),
+)
+```
+
+### WithTimeoutMilliseconds
+
+Configures a hard deadline for the entire request lifecycle in milliseconds.
+
+```go
+func WithTimeoutMilliseconds(timeout int) HttpClientOption
+```
+
+<ParamField path="timeout" type="int">
+  Request timeout in milliseconds. Use `0` to disable the timeout. Default is `30000` milliseconds (30 seconds).
+</ParamField>
+
+**Example:**
+
+```go
+// 5 second timeout
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithTimeoutMilliseconds(5000),
+)
+```
+
+### WithTimeout
+
+<Warning>
+  Deprecated: Use `WithTimeoutSeconds` or `WithTimeoutMilliseconds` instead.
+</Warning>
+
+Configures a request timeout in seconds.
+
+```go
+func WithTimeout(timeout int) HttpClientOption
+```
+
+<ParamField path="timeout" type="int">
+  Request timeout in seconds.
+</ParamField>
+
+## Proxy configuration
+
+### WithProxyUrl
+
+Configures the HTTP client to use the specified proxy URL.
+
+```go
+func WithProxyUrl(proxyUrl string) HttpClientOption
+```
+
+<ParamField path="proxyUrl" type="string">
+  Proxy URL in the format `"http://user:pass@host:port"`. Authentication credentials are optional.
+</ParamField>
+
+**Example:**
+
+```go
+// Proxy without authentication
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithProxyUrl("http://proxy.example.com:8080"),
+)
+
+// Proxy with authentication
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithProxyUrl("http://username:password@proxy.example.com:8080"),
+)
+```
+
+### WithCharlesProxy
+
+Configures the client to use a local Charles Proxy instance for debugging.
+
+```go
+func WithCharlesProxy(host string, port string) HttpClientOption
+```
+
+<ParamField path="host" type="string">
+  Proxy host. Pass empty string to use default `"127.0.0.1"`.
+</ParamField>
+
+<ParamField path="port" type="string">
+  Proxy port. Pass empty string to use default `"8888"`.
+</ParamField>
+
+**Example:**
+
+```go
+// Default Charles Proxy (127.0.0.1:8888)
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithCharlesProxy("", ""),
+)
+
+// Custom host and port
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithCharlesProxy("localhost", "9000"),
+)
+```
+
+### WithProxyDialerFactory
+
+Configures a custom proxy dialer factory for advanced proxy scenarios.
+
+```go
+func WithProxyDialerFactory(proxyDialerFactory ProxyDialerFactory) HttpClientOption
+```
+
+<ParamField path="proxyDialerFactory" type="ProxyDialerFactory">
+  Factory function that creates a custom proxy dialer.
+</ParamField>
+
+**Type signature:**
+```go
+type ProxyDialerFactory func(
+    proxyUrlStr string,
+    timeout time.Duration,
+    localAddr *net.TCPAddr,
+    connectHeaders http.Header,
+    logger Logger,
+) (proxy.ContextDialer, error)
+```
+
+**Example:**
+
+```go
+customFactory := func(
+    proxyUrlStr string,
+    timeout time.Duration,
+    localAddr *net.TCPAddr,
+    connectHeaders http.Header,
+    logger Logger,
+) (proxy.ContextDialer, error) {
+    // Custom proxy logic (e.g., SOCKS5, custom authentication)
+    return myCustomDialer, nil
+}
+
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithProxyDialerFactory(customFactory),
+)
+```
+
+## Cookie management
+
+### WithCookieJar
+
+Configures the client to use the specified cookie jar.
+
+```go
+func WithCookieJar(jar http.CookieJar) HttpClientOption
+```
+
+<ParamField path="jar" type="http.CookieJar">
+  Cookie jar instance. Use `tls_client.NewCookieJar()` to create a new jar.
+</ParamField>
+
+**Example:**
+
+```go
+jar := tls_client.NewCookieJar()
+
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithCookieJar(jar),
+)
+```
+
+## TLS configuration
+
+### WithRandomTLSExtensionOrder
+
+Randomizes the order of TLS extensions in the ClientHello.
+
+```go
+func WithRandomTLSExtensionOrder() HttpClientOption
+```
+
+<Note>
+  GREASE and padding extensions maintain fixed positions and are not affected by randomization.
+</Note>
+
+**Example:**
+
+```go
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithRandomTLSExtensionOrder(),
+)
+```
+
+### WithInsecureSkipVerify
+
+Disables SSL certificate verification.
+
+```go
+func WithInsecureSkipVerify() HttpClientOption
+```
+
+<Warning>
+  Only use this for testing or when connecting to servers with self-signed certificates. This makes connections vulnerable to man-in-the-middle attacks.
+</Warning>
+
+**Example:**
+
+```go
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithInsecureSkipVerify(),
+)
+```
+
+### WithCertificatePinning
+
+Enables SSL certificate pinning to prevent man-in-the-middle attacks.
+
+```go
+func WithCertificatePinning(
+    certificatePins map[string][]string,
+    handlerFunc BadPinHandlerFunc,
+) HttpClientOption
+```
+
+<ParamField path="certificatePins" type="map[string][]string">
+  Map of hostname to array of certificate pin hashes. See [hpkp library](https://github.com/tam7t/hpkp/#examples) for pin generation.
+</ParamField>
+
+<ParamField path="handlerFunc" type="BadPinHandlerFunc">
+  Optional callback function executed when pin validation fails. Pass `nil` if not needed.
+</ParamField>
+
+**Type signature:**
+```go
+type BadPinHandlerFunc func(req *http.Request)
+```
+
+**Example:**
+
+```go
+pins := map[string][]string{
+    "example.com": {
+        "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "sha256/BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+    },
+}
+
+handler := func(req *http.Request) {
+    log.Printf("Certificate pin mismatch for %s", req.URL.Host)
+}
+
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithCertificatePinning(pins, handler),
+)
+```
+
+### WithServerNameOverwrite
+
+Overwrites the server name used for certificate verification and in the ClientHello.
+
+```go
+func WithServerNameOverwrite(serverName string) HttpClientOption
+```
+
+<ParamField path="serverName" type="string">
+  The server name to use instead of the hostname from the URL.
+</ParamField>
+
+<Warning>
+  This option only works properly when combined with `WithInsecureSkipVerify()`.
+</Warning>
+
+**Example:**
+
+```go
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithServerNameOverwrite("custom.example.com"),
+    tls_client.WithInsecureSkipVerify(),
+)
+```
+
+## HTTP protocol options
+
+### WithNotFollowRedirects
+
+Configures the client to not automatically follow HTTP redirects.
+
+```go
+func WithNotFollowRedirects() HttpClientOption
+```
+
+**Example:**
+
+```go
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithNotFollowRedirects(),
+)
+
+resp, _ := client.Get("https://example.com/redirect")
+if resp.StatusCode == 302 {
+    location := resp.Header.Get("Location")
+    fmt.Println("Redirects to:", location)
+}
+```
+
+### WithCustomRedirectFunc
+
+Configures a custom redirect handling function.
+
+```go
+func WithCustomRedirectFunc(
+    redirectFunc func(req *http.Request, via []*http.Request) error,
+) HttpClientOption
+```
+
+<ParamField path="redirectFunc" type="func(req *http.Request, via []*http.Request) error">
+  Custom redirect handler. See [net/http.Client CheckRedirect](https://pkg.go.dev/net/http#Client) documentation.
+</ParamField>
+
+**Example:**
+
+```go
+// Limit redirects to 5
+redirectFunc := func(req *http.Request, via []*http.Request) error {
+    if len(via) >= 5 {
+        return fmt.Errorf("stopped after 5 redirects")
+    }
+    return nil
+}
+
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithCustomRedirectFunc(redirectFunc),
+)
+```
+
+### WithForceHttp1
+
+Forces the client to use HTTP/1.1 protocol.
+
+```go
+func WithForceHttp1() HttpClientOption
+```
+
+<Note>
+  Required for WebSocket connections. See [WebSocket API](/api/websocket).
+</Note>
+
+**Example:**
+
+```go
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithForceHttp1(),
+)
+```
+
+### WithDisableHttp3
+
+Disables HTTP/3 protocol support. The client will fall back to HTTP/2.
+
+```go
+func WithDisableHttp3() HttpClientOption
+```
+
+**Example:**
+
+```go
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithDisableHttp3(),
+)
+```
+
+### WithProtocolRacing
+
+Enables racing between HTTP/3 (QUIC) and HTTP/2 (TCP) connections.
+
+```go
+func WithProtocolRacing() HttpClientOption
+```
+
+Similar to Chrome's "Happy Eyeballs" approach, this starts both connection types in parallel and uses whichever connects first. The client remembers which protocol worked for each host and uses it directly on subsequent requests.
+
+<Note>
+  This option is ignored if `WithForceHttp1()` or `WithDisableHttp3()` is set.
+</Note>
+
+**Example:**
+
+```go
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithProtocolRacing(),
+)
+```
+
+## Network configuration
+
+### WithLocalAddr
+
+Configures the client to use a specific local address for outgoing connections.
+
+```go
+func WithLocalAddr(localAddr net.TCPAddr) HttpClientOption
+```
+
+<ParamField path="localAddr" type="net.TCPAddr">
+  The local TCP address to bind to.
+</ParamField>
+
+**Example:**
+
+```go
+import "net"
+
+localAddr := net.TCPAddr{
+    IP:   net.ParseIP("192.168.1.100"),
+    Port: 0, // Use random port
+}
+
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithLocalAddr(localAddr),
+)
+```
+
+### WithDisableIPV6
+
+Configures the client to only use IPv4 connections.
+
+```go
+func WithDisableIPV6() HttpClientOption
+```
+
+**Example:**
+
+```go
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithDisableIPV6(),
+)
+```
+
+### WithDisableIPV4
+
+Configures the client to only use IPv6 connections.
+
+```go
+func WithDisableIPV4() HttpClientOption
+```
+
+**Example:**
+
+```go
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithDisableIPV4(),
+)
+```
+
+### WithDialer
+
+Configures a custom net.Dialer for DNS resolution and connection establishment.
+
+```go
+func WithDialer(dialer net.Dialer) HttpClientOption
+```
+
+<ParamField path="dialer" type="net.Dialer">
+  Custom dialer instance. Useful for custom DNS resolvers.
+</ParamField>
+
+**Example:**
+
+```go
+import "net"
+
+customDialer := net.Dialer{
+    Timeout:   10 * time.Second,
+    KeepAlive: 30 * time.Second,
+    Resolver: &net.Resolver{
+        PreferGo: true,
+        Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+            // Custom DNS resolver logic
+            return net.Dial("udp", "8.8.8.8:53")
+        },
+    },
+}
+
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithDialer(customDialer),
+)
+```
+
+### WithDialContext
+
+Sets a custom dialer for TCP connections, enabling advanced networking features.
+
+```go
+func WithDialContext(
+    dialContext func(ctx context.Context, network, addr string) (net.Conn, error),
+) HttpClientOption
+```
+
+<ParamField path="dialContext" type="func(ctx context.Context, network, addr string) (net.Conn, error)">
+  Custom dial function for full control over connection establishment.
+</ParamField>
+
+<Warning>
+  This overrides built-in proxy settings. If you need a proxy, you must handle the CONNECT handshake manually. See [GitHub PR #218](https://github.com/bogdanfinn/tls-client/pull/218#issuecomment-3858171801) for details.
+</Warning>
+
+**Example:**
+
+```go
+customDialContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
+    // Custom connection logic (Zero-DNS, socket tagging, DPI bypass)
+    dialer := &net.Dialer{
+        Timeout: 10 * time.Second,
+    }
+    return dialer.DialContext(ctx, network, addr)
+}
+
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithDialContext(customDialContext),
+)
+```
+
+## Header configuration
+
+### WithDefaultHeaders
+
+Configures default headers to use when none are specified on the request.
+
+```go
+func WithDefaultHeaders(defaultHeaders http.Header) HttpClientOption
+```
+
+<ParamField path="defaultHeaders" type="http.Header">
+  Map of default headers to include in all requests.
+</ParamField>
+
+**Example:**
+
+```go
+import http "github.com/bogdanfinn/fhttp"
+
+defaultHeaders := http.Header{
+    "User-Agent": {"MyApp/1.0"},
+    "Accept":     {"application/json"},
+}
+
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithDefaultHeaders(defaultHeaders),
+)
+```
+
+### WithConnectHeaders
+
+Configures headers to include in HTTP CONNECT requests when using a proxy.
+
+```go
+func WithConnectHeaders(headers http.Header) HttpClientOption
+```
+
+<ParamField path="headers" type="http.Header">
+  Headers to send in the CONNECT request to the proxy.
+</ParamField>
+
+**Example:**
+
+```go
+import http "github.com/bogdanfinn/fhttp"
+
+connectHeaders := http.Header{
+    "Proxy-Authorization": {"Bearer token123"},
+}
+
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithProxyUrl("http://proxy.example.com:8080"),
+    tls_client.WithConnectHeaders(connectHeaders),
+)
+```
+
+## Transport options
+
+### WithTransportOptions
+
+Configures advanced transport-level options.
+
+```go
+func WithTransportOptions(transportOptions *TransportOptions) HttpClientOption
+```
+
+<ParamField path="transportOptions" type="*TransportOptions">
+  Transport configuration struct.
+</ParamField>
+
+**TransportOptions struct:**
+
+```go
+type TransportOptions struct {
+    // KeyLogWriter writes TLS master secrets for Wireshark decryption
+    KeyLogWriter io.Writer
+    
+    // IdleConnTimeout is max time idle connections remain open (zero = no limit)
+    IdleConnTimeout *time.Duration
+    
+    // RootCAs for verifying server certificates
+    RootCAs *x509.CertPool
+    
+    MaxIdleConns           int
+    MaxIdleConnsPerHost    int
+    MaxConnsPerHost        int
+    MaxResponseHeaderBytes int64 // Zero = default limit
+    WriteBufferSize        int   // Zero = 4KB default
+    ReadBufferSize         int   // Zero = 4KB default
+    DisableKeepAlives      bool
+    DisableCompression     bool
+}
+```
+
+**Example:**
+
+```go
+import (
+    "os"
+    "time"
+)
+
+// Log TLS keys for Wireshark
+keyLogFile, _ := os.OpenFile("sslkeys.log", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
+
+idleTimeout := 90 * time.Second
+
+transportOpts := &tls_client.TransportOptions{
+    KeyLogWriter:        keyLogFile,
+    IdleConnTimeout:     &idleTimeout,
+    MaxIdleConns:        100,
+    MaxIdleConnsPerHost: 10,
+    DisableCompression:  false,
+}
+
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithTransportOptions(transportOpts),
+)
+```
+
+## Monitoring and debugging
+
+### WithDebug
+
+Enables debug logging for detailed request/response information.
+
+```go
+func WithDebug() HttpClientOption
+```
+
+**Example:**
+
+```go
+client, _ := tls_client.NewHttpClient(tls_client.NewLogger(),
+    tls_client.WithDebug(),
+)
+
+// Logs will show:
+// - Request headers and body
+// - Response headers and body
+// - Raw bytes sent/received
+// - Cookie information
+```
+
+### WithCatchPanics
+
+Configures the client to catch panics during request handling without printing stack traces.
+
+```go
+func WithCatchPanics() HttpClientOption
+```
+
+**Example:**
+
+```go
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithCatchPanics(),
+)
+```
+
+### WithBandwidthTracker
+
+Enables bandwidth tracking to monitor network usage.
+
+```go
+func WithBandwidthTracker() HttpClientOption
+```
+
+**Example:**
+
+```go
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithBandwidthTracker(),
+)
+
+tracker := client.GetBandwidthTracker()
+stats := tracker.GetStats()
+fmt.Printf("Sent: %d bytes, Received: %d bytes\n", stats.Sent, stats.Received)
+```
+
+## Request/response hooks
+
+### WithPreHook
+
+Adds a pre-request hook that executes before each request is sent.
+
+```go
+func WithPreHook(hook PreRequestHookFunc) HttpClientOption
+```
+
+<ParamField path="hook" type="PreRequestHookFunc">
+  Function to execute before each request. Return an error to abort the request.
+</ParamField>
+
+**Type signature:**
+```go
+type PreRequestHookFunc func(req *http.Request) error
+```
+
+**Example:**
+
+```go
+preHook := func(req *http.Request) error {
+    // Add timestamp to all requests
+    req.Header.Set("X-Timestamp", time.Now().Format(time.RFC3339))
+    return nil
+}
+
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithPreHook(preHook),
+)
+```
+
+### WithPostHook
+
+Adds a post-response hook that executes after each request completes.
+
+```go
+func WithPostHook(hook PostResponseHookFunc) HttpClientOption
+```
+
+<ParamField path="hook" type="PostResponseHookFunc">
+  Function to execute after each request completes. Always called even if the request failed.
+</ParamField>
+
+**Type signature:**
+```go
+type PostResponseHookFunc func(ctx *PostResponseContext) error
+
+type PostResponseContext struct {
+    Request  *http.Request
+    Response *http.Response
+    Error    error // Non-nil if request failed
+}
+```
+
+**Example:**
+
+```go
+postHook := func(ctx *PostResponseContext) error {
+    if ctx.Error != nil {
+        log.Printf("Request to %s failed: %v", ctx.Request.URL, ctx.Error)
+    } else {
+        log.Printf("Response from %s: %d", ctx.Request.URL, ctx.Response.StatusCode)
+    }
+    return nil
+}
+
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithPostHook(postHook),
+)
+```
+
+## Special errors
+
+### ErrContinueHooks
+
+Special error that can be returned from hooks to log the error but continue execution.
+
+```go
+var ErrContinueHooks = errors.New("continue hooks")
+```
+
+**Example:**
+
+```go
+import "fmt"
+
+preHook := func(req *http.Request) error {
+    if err := validateRequest(req); err != nil {
+        // Log error but don't abort request
+        return fmt.Errorf("%w: validation failed: %v", tls_client.ErrContinueHooks, err)
+    }
+    return nil
+}
+
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithPreHook(preHook),
+)
+```

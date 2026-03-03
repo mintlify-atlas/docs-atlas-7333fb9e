@@ -1,0 +1,452 @@
+---
+title: Installation
+description: Install TLS Client for Go or use language bindings for Node.js, Python, and C#
+---
+
+## Go installation
+
+TLS Client is primarily a Go library. Install it using Go modules:
+
+```bash
+go get github.com/bogdanfinn/tls-client
+```
+
+### Requirements
+
+- **Go version**: 1.24.1 or higher
+- **Operating systems**: Linux, macOS, Windows
+- **Architectures**: amd64, arm64
+
+### Dependencies
+
+TLS Client automatically installs these dependencies:
+
+- `github.com/bogdanfinn/fhttp` - Fork of Go's net/http with TLS fingerprinting support
+- `github.com/bogdanfinn/utls` - TLS library for client fingerprinting
+- `github.com/bogdanfinn/quic-go-utls` - QUIC implementation for HTTP/3 support
+- `github.com/bogdanfinn/websocket` - WebSocket support with TLS fingerprinting
+
+### Verify installation
+
+Create a simple test to verify the installation:
+
+```go main.go
+package main
+
+import (
+    "fmt"
+    "log"
+
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+)
+
+func main() {
+    options := []tls_client.HttpClientOption{
+        tls_client.WithTimeoutSeconds(30),
+        tls_client.WithClientProfile(profiles.Chrome_144),
+    }
+
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    resp, err := client.Get("https://tls.peet.ws/api/all")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer resp.Body.Close()
+
+    fmt.Printf("✓ TLS Client installed successfully! Status: %d\n", resp.StatusCode)
+}
+```
+
+Run it:
+
+```bash
+go run main.go
+```
+
+## Language bindings
+
+TLS Client provides FFI (Foreign Function Interface) bindings for multiple languages through a shared library.
+
+<Note>
+  The language bindings use a compiled shared library (`.dll`, `.so`, or `.dylib`) that wraps the Go code. You'll need to download or compile the appropriate library for your platform.
+</Note>
+
+### Building the shared library
+
+To build the shared library from source:
+
+```bash
+cd cffi_dist
+./build.sh
+```
+
+This creates platform-specific libraries in the `dist/` directory:
+- **Linux**: `tls-client-linux-amd64-<version>.so`
+- **macOS**: `tls-client-darwin-amd64-<version>.dylib`
+- **Windows**: `tls-client-windows-64-<version>.dll`
+
+### Node.js installation
+
+<Steps>
+  <Step title="Install dependencies">
+    Install the FFI library for Node.js:
+
+    ```bash
+    npm install ffi-napi
+    ```
+  </Step>
+
+  <Step title="Download the shared library">
+    Download the appropriate shared library for your platform and place it in your project directory.
+  </Step>
+
+  <Step title="Create the client">
+    Create a file `client.js`:
+
+    ```javascript client.js
+    const ffi = require('ffi-napi');
+
+    // Load the TLS Client shared library
+    const tlsClient = ffi.Library('./tls-client-darwin-amd64-1.7.2.dylib', {
+        'request': ['string', ['string']],
+        'getCookiesFromSession': ['string', ['string']],
+        'addCookiesToSession': ['string', ['string']],
+        'freeMemory': ['void', ['string']],
+        'destroyAll': ['string', []],
+        'destroySession': ['string', ['string']]
+    });
+
+    // Configure request
+    const requestPayload = {
+        tlsClientIdentifier: 'chrome_144',
+        followRedirects: true,
+        insecureSkipVerify: false,
+        withoutCookieJar: false,
+        timeoutSeconds: 30,
+        sessionId: 'my-session-id',
+        headers: {
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'accept-encoding': 'gzip, deflate, br',
+            'accept-language': 'en-US,en;q=0.9'
+        },
+        headerOrder: [
+            'accept',
+            'user-agent',
+            'accept-encoding',
+            'accept-language'
+        ],
+        requestUrl: 'https://tls.peet.ws/api/all',
+        requestMethod: 'GET',
+        requestBody: '',
+        requestCookies: []
+    };
+
+    // Make request
+    const response = tlsClient.request(JSON.stringify(requestPayload));
+    const result = JSON.parse(response);
+
+    console.log('Status:', result.status);
+    console.log('Body:', result.body);
+
+    // Free memory
+    tlsClient.freeMemory(response);
+    ```
+  </Step>
+
+  <Step title="Run your code">
+    ```bash
+    node client.js
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  Make sure to update the library path to match your platform (`.dylib` for macOS, `.so` for Linux, `.dll` for Windows).
+</Warning>
+
+### Python installation
+
+<Steps>
+  <Step title="Download the shared library">
+    Download the appropriate shared library for your platform and place it in your project directory.
+  </Step>
+
+  <Step title="Create the client">
+    Create a file `client.py`:
+
+    ```python client.py
+    import ctypes
+    import json
+
+    # Load the TLS Client shared library
+    library = ctypes.cdll.LoadLibrary('./tls-client-darwin-amd64-1.7.2.dylib')
+
+    # Configure function signatures
+    request = library.request
+    request.argtypes = [ctypes.c_char_p]
+    request.restype = ctypes.c_char_p
+
+    getCookiesFromSession = library.getCookiesFromSession
+    getCookiesFromSession.argtypes = [ctypes.c_char_p]
+    getCookiesFromSession.restype = ctypes.c_char_p
+
+    addCookiesToSession = library.addCookiesToSession
+    addCookiesToSession.argtypes = [ctypes.c_char_p]
+    addCookiesToSession.restype = ctypes.c_char_p
+
+    freeMemory = library.freeMemory
+    freeMemory.argtypes = [ctypes.c_char_p]
+
+    destroySession = library.destroySession
+    destroySession.argtypes = [ctypes.c_char_p]
+    destroySession.restype = ctypes.c_char_p
+
+    # Configure request
+    request_payload = {
+        'tlsClientIdentifier': 'chrome_144',
+        'followRedirects': True,
+        'insecureSkipVerify': False,
+        'withoutCookieJar': False,
+        'timeoutSeconds': 30,
+        'sessionId': 'my-session-id',
+        'headers': {
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'accept-encoding': 'gzip, deflate, br',
+            'accept-language': 'en-US,en;q=0.9'
+        },
+        'headerOrder': [
+            'accept',
+            'user-agent',
+            'accept-encoding',
+            'accept-language'
+        ],
+        'requestUrl': 'https://tls.peet.ws/api/all',
+        'requestMethod': 'GET',
+        'requestBody': '',
+        'requestCookies': []
+    }
+
+    # Make request
+    request_payload_json = json.dumps(request_payload).encode('utf-8')
+    response = request(request_payload_json)
+    result = json.loads(response.decode('utf-8'))
+
+    print(f"Status: {result['status']}")
+    print(f"Body: {result['body']}")
+
+    # Free memory
+    freeMemory(response)
+    ```
+  </Step>
+
+  <Step title="Run your code">
+    ```bash
+    python client.py
+    ```
+  </Step>
+</Steps>
+
+### C# installation
+
+<Steps>
+  <Step title="Install Newtonsoft.Json">
+    Install the JSON library:
+
+    ```bash
+    dotnet add package Newtonsoft.Json
+    ```
+  </Step>
+
+  <Step title="Download the shared library">
+    Download the Windows DLL and place it in your project directory.
+  </Step>
+
+  <Step title="Create the client">
+    Create a file `Client.cs`:
+
+    ```csharp Client.cs
+    using System;
+    using System.Collections.Generic;
+    using System.Runtime.InteropServices;
+    using Newtonsoft.Json;
+
+    class RequestResult
+    {
+        public string Id { get; set; }
+        public string Body { get; set; }
+        public object Cookies { get; set; }
+        public Dictionary<string, List<string>> Headers { get; set; }
+        public int Status { get; set; }
+        public string Target { get; set; }
+        public string UsedProtocol { get; set; }
+    }
+
+    class RequestPayload
+    {
+        public string TlsClientIdentifier { get; set; } = "chrome_144";
+        public bool FollowRedirects { get; set; } = true;
+        public bool InsecureSkipVerify { get; set; } = false;
+        public bool WithoutCookieJar { get; set; } = false;
+        public int TimeoutSeconds { get; set; } = 30;
+        public string SessionId { get; set; } = "my-session-id";
+        public Dictionary<string, string> Headers { get; set; } = new Dictionary<string, string>();
+        public List<string> HeaderOrder { get; set; }
+        public string RequestUrl { get; set; }
+        public string RequestMethod { get; set; }
+        public string RequestBody { get; set; }
+    }
+
+    class TLSClient
+    {
+        [DllImport("tls-client-windows-64-1.7.2.dll", CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr request(byte[] requestPayload, string sessionID);
+
+        [DllImport("tls-client-windows-64-1.7.2.dll", CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr freeMemory(string memory);
+
+        static void Main(string[] args)
+        {
+            var payload = new RequestPayload
+            {
+                Headers = new Dictionary<string, string>
+                {
+                    { "accept", "text/html,application/xhtml+xml,application/xml;q=0.9" },
+                    { "user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+                    { "accept-encoding", "gzip, deflate, br" },
+                    { "accept-language", "en-US,en;q=0.9" }
+                },
+                HeaderOrder = new List<string> { "accept", "user-agent", "accept-encoding", "accept-language" },
+                RequestUrl = "https://tls.peet.ws/api/all",
+                RequestMethod = "GET",
+                RequestBody = ""
+            };
+
+            string payloadJson = JsonConvert.SerializeObject(payload);
+            byte[] payloadBytes = System.Text.Encoding.UTF8.GetBytes(payloadJson);
+
+            IntPtr responsePtr = request(payloadBytes, payload.SessionId);
+            string responseJson = Marshal.PtrToStringAnsi(responsePtr);
+            
+            var result = JsonConvert.DeserializeObject<RequestResult>(responseJson);
+            
+            Console.WriteLine($"Status: {result.Status}");
+            Console.WriteLine($"Body: {result.Body}");
+
+            freeMemory(responseJson);
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Run your code">
+    ```bash
+    dotnet run
+    ```
+  </Step>
+</Steps>
+
+## Platform-specific notes
+
+### Linux
+
+On Linux, you may need to install additional dependencies:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y build-essential
+```
+
+### macOS
+
+On macOS, you may need to allow the dylib in System Preferences:
+
+1. Try to run your application
+2. Go to **System Preferences** → **Security & Privacy**
+3. Click **Allow Anyway** for the blocked library
+4. Run your application again
+
+### Windows
+
+On Windows, ensure you have:
+- Visual C++ Redistributable installed
+- The DLL in the same directory as your executable or in your system PATH
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Library not found error">
+    Make sure the shared library path is correct and matches your platform:
+    - macOS: `.dylib`
+    - Linux: `.so`
+    - Windows: `.dll`
+
+    Use an absolute path if relative paths don't work:
+    ```python
+    library = ctypes.cdll.LoadLibrary('/absolute/path/to/tls-client.dylib')
+    ```
+  </Accordion>
+
+  <Accordion title="Architecture mismatch">
+    Ensure the shared library architecture matches your runtime:
+    - Use `amd64` libraries for 64-bit systems
+    - Use `arm64` libraries for ARM-based systems (like Apple Silicon)
+  </Accordion>
+
+  <Accordion title="Permission denied">
+    On Linux/macOS, make the library executable:
+    ```bash
+    chmod +x tls-client-*.so
+    # or
+    chmod +x tls-client-*.dylib
+    ```
+  </Accordion>
+
+  <Accordion title="Go version mismatch">
+    If you see errors about Go version compatibility, ensure you're using Go 1.24.1 or higher:
+    ```bash
+    go version
+    ```
+
+    Update Go if needed from [golang.org/dl](https://golang.org/dl/)
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Quickstart"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Make your first request with TLS Client.
+  </Card>
+  <Card
+    title="Configuration"
+    icon="sliders"
+    href="/guides/client-options"
+  >
+    Learn about all available client options.
+  </Card>
+  <Card
+    title="Browser profiles"
+    icon="browser"
+    href="/concepts/client-profiles"
+  >
+    Explore available browser profiles for TLS fingerprinting.
+  </Card>
+  <Card
+    title="Examples"
+    icon="code"
+    href="/guides/basic-usage"
+  >
+    Browse complete examples for different use cases.
+  </Card>
+</CardGroup>

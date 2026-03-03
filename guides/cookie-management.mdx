@@ -1,0 +1,474 @@
+---
+title: Cookie management
+description: Manage cookies with the built-in cookie jar, including getting, setting, and clearing cookies
+---
+
+The TLS Client includes a built-in cookie jar that automatically handles cookies across requests, similar to how browsers work. This guide covers how to use the cookie jar effectively.
+
+## Creating a cookie jar
+
+Always create a cookie jar to maintain session state:
+
+```go
+import (
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+)
+
+jar := tls_client.NewCookieJar()
+
+options := []tls_client.HttpClientOption{
+    tls_client.WithTimeoutSeconds(30),
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithCookieJar(jar),
+}
+
+client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+<Note>
+Without a cookie jar, cookies from server responses are not stored and cookies are not sent with subsequent requests.
+</Note>
+
+## Cookie jar options
+
+### Skip existing cookies
+
+Prevent overwriting existing cookies with the same name:
+
+```go
+jar := tls_client.NewCookieJar(
+    tls_client.WithSkipExisting(),
+)
+
+tls_client.WithCookieJar(jar)
+```
+
+This is useful when you want to preserve manually set cookies even if the server tries to update them.
+
+## Automatic cookie handling
+
+The cookie jar automatically handles cookies from server responses:
+
+```go
+import http "github.com/bogdanfinn/fhttp"
+
+// First request - server sets cookies
+req, err := http.NewRequest(http.MethodGet, "https://example.com/login", nil)
+if err != nil {
+    log.Fatal(err)
+}
+
+resp, err := client.Do(req)
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+
+// Cookies from Set-Cookie header are automatically stored
+
+// Second request - cookies are automatically sent
+req2, err := http.NewRequest(http.MethodGet, "https://example.com/dashboard", nil)
+if err != nil {
+    log.Fatal(err)
+}
+
+resp2, err := client.Do(req2)
+// Cookies are included in the Cookie header automatically
+```
+
+## Getting cookies
+
+Retrieve cookies for a specific URL:
+
+```go
+import "net/url"
+
+u, err := url.Parse("https://example.com")
+if err != nil {
+    log.Fatal(err)
+}
+
+cookies := client.GetCookies(u)
+
+for _, cookie := range cookies {
+    log.Printf("Name: %s, Value: %s, Domain: %s, Path: %s",
+        cookie.Name,
+        cookie.Value,
+        cookie.Domain,
+        cookie.Path,
+    )
+}
+```
+
+<Tip>
+The URL's domain and path determine which cookies are returned. Only cookies that match the URL's domain and path are included.
+</Tip>
+
+## Setting cookies manually
+
+Set cookies programmatically before making requests:
+
+```go
+import (
+    http "github.com/bogdanfinn/fhttp"
+    "net/url"
+)
+
+u, err := url.Parse("https://example.com")
+if err != nil {
+    log.Fatal(err)
+}
+
+cookies := []*http.Cookie{
+    {
+        Name:   "session_id",
+        Value:  "abc123",
+        Path:   "/",
+        Domain: "example.com",
+        MaxAge: 3600,
+    },
+    {
+        Name:   "user_pref",
+        Value:  "dark_mode",
+        Path:   "/",
+        Domain: "example.com",
+    },
+}
+
+client.SetCookies(u, cookies)
+
+// Now make request - cookies will be sent automatically
+resp, err := client.Get("https://example.com/dashboard")
+```
+
+### Cookie attributes
+
+When creating cookies, you can set various attributes:
+
+```go
+cookie := &http.Cookie{
+    Name:   "session",
+    Value:  "xyz789",
+    
+    // Domain and path matching
+    Domain: ".example.com",  // Matches all subdomains
+    Path:   "/",             // Matches all paths
+    
+    // Expiration
+    MaxAge: 86400,           // 24 hours in seconds
+    // Or use Expires:
+    // Expires: time.Now().Add(24 * time.Hour),
+    
+    // Security flags
+    Secure:   true,          // Only sent over HTTPS
+    HttpOnly: true,          // Not accessible to JavaScript
+    SameSite: http.SameSiteStrictMode,  // CSRF protection
+}
+
+client.SetCookies(u, []*http.Cookie{cookie})
+```
+
+## Replacing the cookie jar
+
+Replace the entire cookie jar to clear all cookies:
+
+```go
+// Create a new empty jar
+newJar := tls_client.NewCookieJar()
+
+// Replace the client's jar
+client.SetCookieJar(newJar)
+
+// All previous cookies are now cleared
+```
+
+### Getting the current jar
+
+Retrieve the current cookie jar:
+
+```go
+currentJar := client.GetCookieJar()
+
+// Use the jar with another client
+newClient.SetCookieJar(currentJar)
+```
+
+## Expired cookies
+
+The cookie jar automatically filters out expired cookies:
+
+```go
+import "net/url"
+
+u, err := url.Parse("https://example.com")
+if err != nil {
+    log.Fatal(err)
+}
+
+// Set a cookie that expires immediately
+expiredCookie := &http.Cookie{
+    Name:   "temp",
+    Value:  "data",
+    MaxAge: -1,  // Already expired
+}
+
+client.SetCookies(u, []*http.Cookie{expiredCookie})
+
+// Get cookies - expired cookie won't be included
+cookies := client.GetCookies(u)
+log.Printf("Active cookies: %d", len(cookies))  // Won't include expired cookie
+```
+
+## Complete example: Login session
+
+A practical example showing cookie-based authentication:
+
+```go
+package main
+
+import (
+    "bytes"
+    "encoding/json"
+    "fmt"
+    "io"
+    "log"
+    "net/url"
+    "strings"
+
+    http "github.com/bogdanfinn/fhttp"
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+)
+
+func main() {
+    // Create client with cookie jar
+    jar := tls_client.NewCookieJar()
+    
+    options := []tls_client.HttpClientOption{
+        tls_client.WithTimeoutSeconds(30),
+        tls_client.WithClientProfile(profiles.Chrome_133),
+        tls_client.WithCookieJar(jar),
+    }
+    
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Step 1: Login
+    loginData := map[string]string{
+        "username": "user@example.com",
+        "password": "secret123",
+    }
+    
+    jsonData, err := json.Marshal(loginData)
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    loginReq, err := http.NewRequest(
+        http.MethodPost,
+        "https://api.example.com/auth/login",
+        bytes.NewBuffer(jsonData),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    loginReq.Header.Set("Content-Type", "application/json")
+    
+    loginResp, err := client.Do(loginReq)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer loginResp.Body.Close()
+    
+    if loginResp.StatusCode != 200 {
+        log.Fatalf("Login failed with status: %d", loginResp.StatusCode)
+    }
+    
+    log.Println("Login successful")
+    
+    // Check cookies set by server
+    u, _ := url.Parse("https://api.example.com")
+    cookies := client.GetCookies(u)
+    
+    log.Printf("Received %d cookies:", len(cookies))
+    for _, cookie := range cookies {
+        log.Printf("  - %s: %s", cookie.Name, cookie.Value)
+    }
+
+    // Step 2: Make authenticated request
+    // Cookies are automatically included
+    dashboardReq, err := http.NewRequest(
+        http.MethodGet,
+        "https://api.example.com/dashboard",
+        nil,
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    dashboardResp, err := client.Do(dashboardReq)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer dashboardResp.Body.Close()
+    
+    body, _ := io.ReadAll(dashboardResp.Body)
+    fmt.Printf("Dashboard response: %s\n", string(body))
+
+    // Step 3: Logout (clear session)
+    logoutReq, err := http.NewRequest(
+        http.MethodPost,
+        "https://api.example.com/auth/logout",
+        nil,
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    logoutResp, err := client.Do(logoutReq)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer logoutResp.Body.Close()
+    
+    log.Println("Logged out")
+}
+```
+
+## Sharing cookies between clients
+
+You can share the same cookie jar across multiple clients:
+
+```go
+// Create shared jar
+sharedJar := tls_client.NewCookieJar()
+
+// Client 1
+client1, err := tls_client.NewHttpClient(
+    tls_client.NewNoopLogger(),
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithCookieJar(sharedJar),
+)
+
+// Client 2 - shares the same cookies
+client2, err := tls_client.NewHttpClient(
+    tls_client.NewNoopLogger(),
+    tls_client.WithClientProfile(profiles.Firefox_133),
+    tls_client.WithCookieJar(sharedJar),
+)
+
+// Cookies set by client1 are available to client2
+client1.Get("https://example.com/set-cookie")
+cookies := client2.GetCookies(mustParseURL("https://example.com"))
+```
+
+<Warning>
+Sharing a cookie jar between clients is not thread-safe. If you need concurrent access, implement your own locking mechanism.
+</Warning>
+
+## Cookie persistence
+
+The built-in cookie jar is in-memory only. To persist cookies across restarts:
+
+```go
+import (
+    "encoding/json"
+    "os"
+    "net/url"
+)
+
+// Save cookies to file
+func saveCookies(client tls_client.HttpClient, filename string) error {
+    u, _ := url.Parse("https://example.com")
+    cookies := client.GetCookies(u)
+    
+    file, err := os.Create(filename)
+    if err != nil {
+        return err
+    }
+    defer file.Close()
+    
+    return json.NewEncoder(file).Encode(cookies)
+}
+
+// Load cookies from file
+func loadCookies(client tls_client.HttpClient, filename string) error {
+    file, err := os.Open(filename)
+    if err != nil {
+        return err
+    }
+    defer file.Close()
+    
+    var cookies []*http.Cookie
+    if err := json.NewDecoder(file).Decode(&cookies); err != nil {
+        return err
+    }
+    
+    u, _ := url.Parse("https://example.com")
+    client.SetCookies(u, cookies)
+    
+    return nil
+}
+```
+
+## Debugging cookies
+
+View cookies in requests and responses with debug mode:
+
+```go
+options := []tls_client.HttpClientOption{
+    tls_client.WithTimeoutSeconds(30),
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithCookieJar(jar),
+    tls_client.WithDebug(),  // Enable debug logging
+}
+
+client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+
+// Debug output will show:
+// - Cookies sent in request
+// - Cookies received in response
+```
+
+## Best practices
+
+<Steps>
+
+### Always use a cookie jar
+
+Create a cookie jar for any client that needs to maintain session state.
+
+### Use skip existing for manual control
+
+Enable `WithSkipExisting()` when you need to set cookies manually and prevent the server from overwriting them.
+
+### Clear cookies between sessions
+
+Replace the cookie jar or create a new client when starting a new session:
+
+```go
+client.SetCookieJar(tls_client.NewCookieJar())
+```
+
+### Set appropriate cookie attributes
+
+When setting cookies manually, use proper domain, path, and security flags.
+
+</Steps>
+
+<Note>
+The cookie jar respects standard cookie rules including domain matching, path matching, expiration, and the Secure flag.
+</Note>
+
+## Next steps
+
+- Learn about [basic usage](/guides/basic-usage) with cookies
+- Configure [client options](/guides/client-options)
+- Set up [request hooks](/guides/request-hooks) to monitor cookie changes

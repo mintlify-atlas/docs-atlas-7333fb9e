@@ -1,0 +1,401 @@
+---
+title: WebSocket
+description: WebSocket API with TLS fingerprinting support
+---
+
+The WebSocket API allows you to create WebSocket connections that use the same TLS fingerprinting as regular HTTP requests.
+
+<Warning>
+  WebSocket connections require HTTP/1.1. You must create your HttpClient with `WithForceHttp1()` option.
+</Warning>
+
+## Constructor
+
+### NewWebsocket
+
+Creates a new WebSocket client that uses tls-client for connections.
+
+```go
+func NewWebsocket(logger Logger, options ...WebsocketOption) (*Websocket, error)
+```
+
+<ParamField path="logger" type="Logger">
+  Logger instance for debugging. Pass `nil` to use a no-op logger.
+</ParamField>
+
+<ParamField path="options" type="...WebsocketOption">
+  Variable number of WebSocket configuration options. See [WebSocket options](#websocket-options) below.
+</ParamField>
+
+<ResponseField name="Websocket" type="*Websocket">
+  The configured WebSocket client instance.
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if WebSocket creation fails (e.g., missing required options).
+</ResponseField>
+
+**Example:**
+
+```go
+import (
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+    http "github.com/bogdanfinn/fhttp"
+)
+
+// Create HTTP client with HTTP/1.1 (required for WebSocket)
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithForceHttp1(), // Required!
+)
+
+// Create WebSocket with header ordering
+headers := http.Header{
+    "User-Agent": {"MyBot/1.0"},
+    http.HeaderOrderKey: {"host", "upgrade", "connection", "user-agent"},
+}
+
+ws, err := tls_client.NewWebsocket(nil,
+    tls_client.WithTlsClient(client),
+    tls_client.WithUrl("wss://example.com/ws"),
+    tls_client.WithHeaders(headers),
+)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+## Methods
+
+### Connect
+
+Establishes a WebSocket connection to the configured URL.
+
+```go
+func (w *Websocket) Connect(ctx context.Context) (*websocket.Conn, error)
+```
+
+<ParamField path="ctx" type="context.Context">
+  Context for controlling connection lifetime and cancellation.
+</ParamField>
+
+<ResponseField name="conn" type="*websocket.Conn">
+  The established WebSocket connection. Must be closed when done.
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if connection fails.
+</ResponseField>
+
+**Example:**
+
+```go
+import "context"
+
+// Connect with timeout
+ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+defer cancel()
+
+conn, err := ws.Connect(ctx)
+if err != nil {
+    log.Fatal(err)
+}
+defer conn.Close()
+
+// Send message
+err = conn.WriteMessage(websocket.TextMessage, []byte("Hello, WebSocket!"))
+if err != nil {
+    log.Fatal(err)
+}
+
+// Read message
+messageType, message, err := conn.ReadMessage()
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Printf("Received: %s\n", message)
+```
+
+## WebSocket options
+
+### WithUrl
+
+Sets the WebSocket URL to connect to.
+
+```go
+func WithUrl(url string) WebsocketOption
+```
+
+<ParamField path="url" type="string">
+  WebSocket URL in the format `"ws://"` or `"wss://"` (secure). This option is required.
+</ParamField>
+
+**Example:**
+
+```go
+ws, _ := tls_client.NewWebsocket(nil,
+    tls_client.WithUrl("wss://stream.example.com/feed"),
+    // ... other options
+)
+```
+
+### WithTlsClient
+
+Sets the tls-client HttpClient to use for the WebSocket connection.
+
+```go
+func WithTlsClient(tlsClient HttpClient) WebsocketOption
+```
+
+<ParamField path="tlsClient" type="HttpClient">
+  The HttpClient instance created with `NewHttpClient()`. This option is required.
+</ParamField>
+
+<Warning>
+  The HttpClient must be created with `WithForceHttp1()` option, as WebSocket requires HTTP/1.1.
+</Warning>
+
+**Example:**
+
+```go
+// Create client with HTTP/1.1
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithForceHttp1(), // Required!
+)
+
+ws, _ := tls_client.NewWebsocket(nil,
+    tls_client.WithTlsClient(client),
+    // ... other options
+)
+```
+
+### WithHeaders
+
+Sets custom headers to include in the WebSocket handshake request.
+
+```go
+func WithHeaders(headers http.Header) WebsocketOption
+```
+
+<ParamField path="headers" type="http.Header">
+  HTTP headers to send during the WebSocket handshake. Can include `http.HeaderOrderKey` for header ordering.
+</ParamField>
+
+**Example:**
+
+```go
+import http "github.com/bogdanfinn/fhttp"
+
+headers := http.Header{
+    "User-Agent":      {"MyBot/1.0"},
+    "Origin":          {"https://example.com"},
+    "X-Custom-Header": {"custom-value"},
+    http.HeaderOrderKey: {
+        "host",
+        "upgrade",
+        "connection",
+        "origin",
+        "user-agent",
+        "x-custom-header",
+    },
+}
+
+ws, _ := tls_client.NewWebsocket(nil,
+    tls_client.WithHeaders(headers),
+    // ... other options
+)
+```
+
+### WithReadBufferSize
+
+Sets the I/O buffer size in bytes for reading WebSocket frames.
+
+```go
+func WithReadBufferSize(readBufferSize int) WebsocketOption
+```
+
+<ParamField path="readBufferSize" type="int">
+  Buffer size in bytes. Use `0` for default size (4KB).
+</ParamField>
+
+**Example:**
+
+```go
+// 8KB read buffer
+ws, _ := tls_client.NewWebsocket(nil,
+    tls_client.WithReadBufferSize(8192),
+    // ... other options
+)
+```
+
+### WithWriteBufferSize
+
+Sets the I/O buffer size in bytes for writing WebSocket frames.
+
+```go
+func WithWriteBufferSize(writeBufferSize int) WebsocketOption
+```
+
+<ParamField path="writeBufferSize" type="int">
+  Buffer size in bytes. Use `0` for default size (4KB).
+</ParamField>
+
+**Example:**
+
+```go
+// 16KB write buffer for large messages
+ws, _ := tls_client.NewWebsocket(nil,
+    tls_client.WithWriteBufferSize(16384),
+    // ... other options
+)
+```
+
+### WithHandshakeTimeoutMilliseconds
+
+Sets the timeout for the WebSocket handshake.
+
+```go
+func WithHandshakeTimeoutMilliseconds(timeout int) WebsocketOption
+```
+
+<ParamField path="timeout" type="int">
+  Handshake timeout in milliseconds. Use `0` for no timeout.
+</ParamField>
+
+**Example:**
+
+```go
+// 5 second handshake timeout
+ws, _ := tls_client.NewWebsocket(nil,
+    tls_client.WithHandshakeTimeoutMilliseconds(5000),
+    // ... other options
+)
+```
+
+### WithCookiejar
+
+Sets a cookie jar to use for the WebSocket connection.
+
+```go
+func WithCookiejar(cookiejar http.CookieJar) WebsocketOption
+```
+
+<ParamField path="cookiejar" type="http.CookieJar">
+  Cookie jar instance. Cookies will be sent during the WebSocket handshake.
+</ParamField>
+
+**Example:**
+
+```go
+import http "github.com/bogdanfinn/fhttp"
+
+// Share cookie jar with HTTP client
+jar := tls_client.NewCookieJar()
+
+client, _ := tls_client.NewHttpClient(nil,
+    tls_client.WithCookieJar(jar),
+)
+
+// Perform HTTP requests that set cookies
+client.Get("https://example.com/login")
+
+// WebSocket will use the same cookies
+ws, _ := tls_client.NewWebsocket(nil,
+    tls_client.WithTlsClient(client),
+    tls_client.WithCookiejar(jar),
+    tls_client.WithUrl("wss://example.com/ws"),
+)
+```
+
+## Complete example
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "time"
+
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+    http "github.com/bogdanfinn/fhttp"
+    "github.com/bogdanfinn/websocket"
+)
+
+func main() {
+    // Create HTTP client with HTTP/1.1 (required for WebSocket)
+    client, err := tls_client.NewHttpClient(tls_client.NewLogger(),
+        tls_client.WithClientProfile(profiles.Chrome_133),
+        tls_client.WithForceHttp1(), // Required!
+        tls_client.WithTimeoutSeconds(30),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Configure WebSocket headers with ordering
+    headers := http.Header{
+        "User-Agent": {"Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+        "Origin":     {"https://example.com"},
+        http.HeaderOrderKey: {
+            "host",
+            "upgrade",
+            "connection",
+            "origin",
+            "user-agent",
+        },
+    }
+
+    // Create WebSocket client
+    ws, err := tls_client.NewWebsocket(nil,
+        tls_client.WithTlsClient(client),
+        tls_client.WithUrl("wss://stream.example.com/feed"),
+        tls_client.WithHeaders(headers),
+        tls_client.WithHandshakeTimeoutMilliseconds(10000),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Connect with timeout
+    ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+    defer cancel()
+
+    conn, err := ws.Connect(ctx)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer conn.Close()
+
+    fmt.Println("WebSocket connected!")
+
+    // Send a message
+    err = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"subscribe","channel":"events"}`))
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Read messages in a loop
+    for {
+        messageType, message, err := conn.ReadMessage()
+        if err != nil {
+            log.Printf("Read error: %v", err)
+            break
+        }
+
+        switch messageType {
+        case websocket.TextMessage:
+            fmt.Printf("Text message: %s\n", message)
+        case websocket.BinaryMessage:
+            fmt.Printf("Binary message: %d bytes\n", len(message))
+        case websocket.CloseMessage:
+            fmt.Println("Connection closed by server")
+            return
+        }
+    }
+}
+```

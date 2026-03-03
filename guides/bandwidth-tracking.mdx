@@ -1,0 +1,507 @@
+---
+title: Bandwidth tracking
+description: Monitor bandwidth usage for all HTTP requests with built-in tracking
+---
+
+The TLS Client includes built-in bandwidth tracking that monitors all data sent and received across connections. This is useful for monitoring API usage, debugging performance issues, and understanding data consumption.
+
+## Enabling bandwidth tracking
+
+Enable bandwidth tracking when creating the client:
+
+```go
+import (
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+)
+
+options := []tls_client.HttpClientOption{
+    tls_client.WithTimeoutSeconds(30),
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithBandwidthTracker(),  // Enable tracking
+}
+
+client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+## Reading bandwidth statistics
+
+Get bandwidth statistics from the client:
+
+```go
+// Make some requests
+client.Get("https://api.example.com/data")
+client.Post("https://api.example.com/upload", "application/json", data)
+
+// Get the tracker
+tracker := client.GetBandwidthTracker()
+
+// Read statistics
+totalBytes := tracker.GetTotalBandwidth()
+sentBytes := tracker.GetWriteBytes()
+receivedBytes := tracker.GetReadBytes()
+
+log.Printf("Total: %d bytes", totalBytes)
+log.Printf("Sent: %d bytes", sentBytes)
+log.Printf("Received: %d bytes", receivedBytes)
+```
+
+## Bandwidth tracker interface
+
+The tracker provides three methods:
+
+```go
+type BandwidthTracker interface {
+    // Total bandwidth (sent + received)
+    GetTotalBandwidth() int64
+    
+    // Bytes written (uploaded)
+    GetWriteBytes() int64
+    
+    // Bytes read (downloaded)
+    GetReadBytes() int64
+    
+    // Reset all counters to zero
+    Reset()
+}
+```
+
+## Resetting counters
+
+Reset bandwidth counters to start fresh:
+
+```go
+tracker := client.GetBandwidthTracker()
+
+// Reset all counters to zero
+tracker.Reset()
+
+// Make new requests
+client.Get("https://api.example.com/data")
+
+// Get fresh statistics
+newTotal := tracker.GetTotalBandwidth()
+```
+
+## Complete example
+
+A practical example tracking bandwidth across multiple requests:
+
+```go
+package main
+
+import (
+    "fmt"
+    "io"
+    "log"
+    "strings"
+
+    http "github.com/bogdanfinn/fhttp"
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+)
+
+func formatBytes(bytes int64) string {
+    const unit = 1024
+    if bytes < unit {
+        return fmt.Sprintf("%d B", bytes)
+    }
+    div, exp := int64(unit), 0
+    for n := bytes / unit; n >= unit; n /= unit {
+        div *= unit
+        exp++
+    }
+    return fmt.Sprintf("%.2f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+func main() {
+    options := []tls_client.HttpClientOption{
+        tls_client.WithTimeoutSeconds(30),
+        tls_client.WithClientProfile(profiles.Chrome_133),
+        tls_client.WithBandwidthTracker(),
+    }
+    
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    tracker := client.GetBandwidthTracker()
+
+    // Test 1: GET request
+    fmt.Println("Test 1: GET request")
+    tracker.Reset()
+    
+    resp, err := client.Get("https://httpbin.org/get")
+    if err != nil {
+        log.Fatal(err)
+    }
+    io.ReadAll(resp.Body)
+    resp.Body.Close()
+    
+    fmt.Printf("  Sent: %s\n", formatBytes(tracker.GetWriteBytes()))
+    fmt.Printf("  Received: %s\n", formatBytes(tracker.GetReadBytes()))
+    fmt.Printf("  Total: %s\n\n", formatBytes(tracker.GetTotalBandwidth()))
+
+    // Test 2: POST request
+    fmt.Println("Test 2: POST request")
+    tracker.Reset()
+    
+    postData := strings.Repeat("x", 10000) // 10KB of data
+    resp, err = client.Post(
+        "https://httpbin.org/post",
+        "text/plain",
+        strings.NewReader(postData),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    io.ReadAll(resp.Body)
+    resp.Body.Close()
+    
+    fmt.Printf("  Sent: %s\n", formatBytes(tracker.GetWriteBytes()))
+    fmt.Printf("  Received: %s\n", formatBytes(tracker.GetReadBytes()))
+    fmt.Printf("  Total: %s\n\n", formatBytes(tracker.GetTotalBandwidth()))
+
+    // Test 3: Image download
+    fmt.Println("Test 3: Image download")
+    tracker.Reset()
+    
+    resp, err = client.Get("https://httpbin.org/image/png")
+    if err != nil {
+        log.Fatal(err)
+    }
+    imageData, _ := io.ReadAll(resp.Body)
+    resp.Body.Close()
+    
+    fmt.Printf("  Sent: %s\n", formatBytes(tracker.GetWriteBytes()))
+    fmt.Printf("  Received: %s\n", formatBytes(tracker.GetReadBytes()))
+    fmt.Printf("  Image size: %s\n", formatBytes(int64(len(imageData))))
+    fmt.Printf("  Total: %s\n", formatBytes(tracker.GetTotalBandwidth()))
+}
+```
+
+Output example:
+```
+Test 1: GET request
+  Sent: 423 B
+  Received: 1.45 KB
+  Total: 1.87 KB
+
+Test 2: POST request
+  Sent: 10.58 KB
+  Received: 2.31 KB
+  Total: 12.89 KB
+
+Test 3: Image download
+  Sent: 445 B
+  Received: 8.56 KB
+  Image size: 8.09 KB
+  Total: 9.00 KB
+```
+
+## Tracking per-request bandwidth
+
+Track bandwidth for individual requests using reset:
+
+```go
+tracker := client.GetBandwidthTracker()
+
+// Request 1
+tracker.Reset()
+resp1, _ := client.Get("https://api.example.com/small")
+io.ReadAll(resp1.Body)
+resp1.Body.Close()
+req1Bandwidth := tracker.GetTotalBandwidth()
+
+// Request 2
+tracker.Reset()
+resp2, _ := client.Get("https://api.example.com/large")
+io.ReadAll(resp2.Body)
+resp2.Body.Close()
+req2Bandwidth := tracker.GetTotalBandwidth()
+
+log.Printf("Request 1: %d bytes", req1Bandwidth)
+log.Printf("Request 2: %d bytes", req2Bandwidth)
+```
+
+## Cumulative tracking
+
+Track total bandwidth across many requests:
+
+```go
+tracker := client.GetBandwidthTracker()
+
+// Make many requests without resetting
+urls := []string{
+    "https://api.example.com/endpoint1",
+    "https://api.example.com/endpoint2",
+    "https://api.example.com/endpoint3",
+}
+
+for _, url := range urls {
+    resp, err := client.Get(url)
+    if err != nil {
+        continue
+    }
+    io.ReadAll(resp.Body)
+    resp.Body.Close()
+}
+
+// Get cumulative statistics
+totalBytes := tracker.GetTotalBandwidth()
+log.Printf("Total bandwidth across all requests: %d bytes", totalBytes)
+```
+
+## Monitoring uploads vs downloads
+
+Compare data sent vs received:
+
+```go
+tracker := client.GetBandwidthTracker()
+
+// Make requests
+// ... perform operations ...
+
+sent := tracker.GetWriteBytes()
+received := tracker.GetReadBytes()
+
+ratio := float64(received) / float64(sent)
+
+log.Printf("Upload: %d bytes", sent)
+log.Printf("Download: %d bytes", received)
+log.Printf("Download/Upload ratio: %.2f", ratio)
+```
+
+## Using with request hooks
+
+Combine bandwidth tracking with request hooks for automatic logging:
+
+```go
+var lastTotal int64 = 0
+
+postHook := func(ctx *tls_client.PostResponseContext) error {
+    tracker := ctx.Request.Context().Value("client").(tls_client.HttpClient).
+        GetBandwidthTracker()
+    
+    currentTotal := tracker.GetTotalBandwidth()
+    requestBandwidth := currentTotal - lastTotal
+    lastTotal = currentTotal
+    
+    log.Printf("Request to %s used %d bytes",
+        ctx.Request.URL.Host,
+        requestBandwidth,
+    )
+    
+    return nil
+}
+
+options := []tls_client.HttpClientOption{
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithBandwidthTracker(),
+    tls_client.WithPostHook(postHook),
+}
+
+client, _ := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+```
+
+See the [request hooks guide](/guides/request-hooks) for more details.
+
+## Real-time monitoring
+
+Monitor bandwidth in real-time during long operations:
+
+```go
+import "time"
+
+tracker := client.GetBandwidthTracker()
+tracker.Reset()
+
+// Start monitoring in background
+done := make(chan bool)
+go func() {
+    ticker := time.NewTicker(1 * time.Second)
+    defer ticker.Stop()
+    
+    for {
+        select {
+        case <-ticker.C:
+            total := tracker.GetTotalBandwidth()
+            sent := tracker.GetWriteBytes()
+            received := tracker.GetReadBytes()
+            
+            log.Printf("Bandwidth: %d bytes (↑%d ↓%d)",
+                total, sent, received)
+        case <-done:
+            return
+        }
+    }
+}()
+
+// Perform operations
+for i := 0; i < 10; i++ {
+    resp, _ := client.Get(fmt.Sprintf("https://api.example.com/data/%d", i))
+    io.ReadAll(resp.Body)
+    resp.Body.Close()
+}
+
+// Stop monitoring
+done <- true
+```
+
+## Performance impact
+
+Bandwidth tracking has minimal performance overhead:
+
+- Uses atomic operations for thread-safe counting
+- No allocations during tracking
+- Negligible CPU usage
+- No memory overhead beyond counter storage
+
+```go
+// Tracking is always safe for production use
+tls_client.WithBandwidthTracker()
+```
+
+<Note>
+Bandwidth tracking counts raw TCP/UDP bytes, including protocol overhead. The actual HTTP payload may be smaller than the tracked bandwidth.
+</Note>
+
+## What is tracked
+
+Bandwidth tracking captures:
+
+- HTTP request headers
+- HTTP request body
+- HTTP response headers
+- HTTP response body
+- TLS handshake data
+- TCP/UDP protocol overhead
+- Compression overhead
+
+It does **not** track:
+- DNS queries
+- Lower-level network framing
+- Retransmissions at the TCP layer
+
+## Best practices
+
+<Steps>
+
+### Reset between logical operations
+
+Reset counters when starting new operations to get accurate per-operation stats:
+
+```go
+tracker.Reset()
+// Perform operation
+stats := tracker.GetTotalBandwidth()
+```
+
+### Always read response bodies
+
+Bandwidth is tracked during read operations, so always read the full body:
+
+```go
+resp, _ := client.Get(url)
+io.ReadAll(resp.Body)  // This is when download bandwidth is tracked
+resp.Body.Close()
+```
+
+### Format output for readability
+
+Use human-readable formats for bandwidth output:
+
+```go
+func formatBytes(bytes int64) string {
+    const unit = 1024
+    if bytes < unit {
+        return fmt.Sprintf("%d B", bytes)
+    }
+    div, exp := int64(unit), 0
+    for n := bytes / unit; n >= unit; n /= unit {
+        div *= unit
+        exp++
+    }
+    return fmt.Sprintf("%.2f %cB", 
+        float64(bytes)/float64(div), 
+        "KMGTPE"[exp])
+}
+```
+
+### Combine with logging
+
+Use bandwidth tracking with logging to understand request costs:
+
+```go
+log.Printf("Request completed: %d bytes in %v",
+    tracker.GetTotalBandwidth(),
+    duration,
+)
+```
+
+</Steps>
+
+## Use cases
+
+### API quota monitoring
+
+Track API usage against quotas:
+
+```go
+const dailyQuota = 100 * 1024 * 1024 // 100 MB
+
+tracker := client.GetBandwidthTracker()
+// Make API calls throughout the day
+
+if tracker.GetTotalBandwidth() > dailyQuota {
+    log.Println("Daily bandwidth quota exceeded")
+}
+```
+
+### Cost optimization
+
+Identify expensive endpoints:
+
+```go
+endpoints := map[string]int64{}
+
+for endpoint := range endpointList {
+    tracker.Reset()
+    client.Get(endpoint)
+    endpoints[endpoint] = tracker.GetTotalBandwidth()
+}
+
+// Find most expensive endpoint
+// Optimize or cache it
+```
+
+### Performance testing
+
+Measure bandwidth efficiency:
+
+```go
+// Test with compression
+tracker.Reset()
+// ... make requests ...
+withCompression := tracker.GetTotalBandwidth()
+
+// Test without compression
+tracker.Reset()
+// ... make requests ...
+withoutCompression := tracker.GetTotalBandwidth()
+
+savings := float64(withoutCompression-withCompression) / 
+    float64(withoutCompression) * 100
+
+log.Printf("Compression saved %.1f%%", savings)
+```
+
+## Next steps
+
+- Use [request hooks](/guides/request-hooks) to automatically log bandwidth
+- Enable [protocol racing](/guides/protocol-racing) and compare bandwidth across protocols
+- Learn about [client options](/guides/client-options) for compression settings

@@ -1,0 +1,497 @@
+---
+title: Certificate pinning
+description: Implement SSL certificate pinning for enhanced security and MITM attack prevention
+---
+
+Certificate pinning adds an extra layer of security by validating that the server's SSL certificate matches a known "pinned" certificate. This prevents man-in-the-middle (MITM) attacks even if an attacker compromises a Certificate Authority.
+
+## What is certificate pinning?
+
+Certificate pinning validates the server's SSL certificate against a known fingerprint (pin) rather than just trusting any certificate signed by a trusted CA. This ensures you're connecting to the real server, not an attacker's proxy.
+
+## Generating certificate pins
+
+Before you can pin certificates, you need to generate the pins. Use the `hpkp-pins` tool:
+
+```bash
+# Install hpkp-pins
+go install github.com/tam7t/hpkp@latest
+
+# Generate pins for a domain
+hpkp-pins -server=api.example.com:443
+```
+
+Output example:
+```
+api.example.com:443
+  sha256/NQvy9sFS99nBqk/nZCUF44hFhshrkvxqYtfrZq3i+Ww=
+  sha256/4a6cPehI7OG6cuDZka5NDZ7FR8a60d3auda+sKfg4Ng=
+  sha256/x4QzPSC810K5/cMjb05Qm4k3Bw5zBn4lTdO/nEW/Td4=
+```
+
+<Tip>
+Always pin multiple certificates: the current certificate, backup certificates, and root CA certificates. This prevents your application from breaking when the server rotates certificates.
+</Tip>
+
+## Basic certificate pinning
+
+Enable certificate pinning when creating the client:
+
+```go
+import (
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+)
+
+// Map of hostname to certificate pins
+pins := map[string][]string{
+    "api.example.com": {
+        "NQvy9sFS99nBqk/nZCUF44hFhshrkvxqYtfrZq3i+Ww=",
+        "4a6cPehI7OG6cuDZka5NDZ7FR8a60d3auda+sKfg4Ng=",
+        "x4QzPSC810K5/cMjb05Qm4k3Bw5zBn4lTdO/nEW/Td4=",
+    },
+}
+
+// Handler called when a bad pin is detected
+badPinHandler := func(req *http.Request) {
+    log.Printf("BAD SSL PIN detected for: %s", req.URL.Host)
+    // Could send alert, log to monitoring system, etc.
+}
+
+options := []tls_client.HttpClientOption{
+    tls_client.WithTimeoutSeconds(30),
+    tls_client.WithClientProfile(profiles.Chrome_133),
+    tls_client.WithCertificatePinning(pins, badPinHandler),
+}
+
+client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Make request - certificate will be validated against pins
+resp, err := client.Get("https://api.example.com/data")
+if err != nil {
+    log.Printf("Request failed: %v", err)
+    // Could be a bad pin error
+}
+```
+
+<Warning>
+Certificate pinning cannot be used with `WithInsecureSkipVerify()`. The client will return an error if you try to use both options together.
+</Warning>
+
+## Pinning subdomains
+
+Pin all subdomains using wildcard notation:
+
+```go
+pins := map[string][]string{
+    // Pin for specific domain
+    "api.example.com": {
+        "pin1...",
+        "pin2...",
+    },
+    
+    // Pin for all subdomains (*.example.com)
+    "*.example.com": {
+        "pin1...",
+        "pin2...",
+    },
+}
+
+tls_client.WithCertificatePinning(pins, badPinHandler)
+```
+
+The wildcard `*.example.com` matches:
+- `api.example.com`
+- `www.example.com`
+- `cdn.example.com`
+
+But **not**:
+- `example.com` (no subdomain)
+- `sub.api.example.com` (nested subdomain)
+
+## Bad pin handler
+
+The bad pin handler is called when certificate validation fails:
+
+```go
+import http "github.com/bogdanfinn/fhttp"
+
+badPinHandler := func(req *http.Request) {
+    // Log the incident
+    log.Printf("SECURITY ALERT: Bad SSL pin for %s", req.URL.Host)
+    log.Printf("Request URL: %s", req.URL.String())
+    log.Printf("Request headers: %v", req.Header)
+    
+    // Send alert to monitoring system
+    sendAlert(fmt.Sprintf("SSL pin mismatch: %s", req.URL.Host))
+    
+    // Could also implement rate limiting, blocking, etc.
+}
+
+tls_client.WithCertificatePinning(pins, badPinHandler)
+```
+
+<Note>
+The bad pin handler is called **before** the request returns an error. Use it for logging and alerting, not for error handling.
+</Note>
+
+## Default bad pin handler
+
+Use the built-in default handler for simple logging:
+
+```go
+tls_client.WithCertificatePinning(pins, tls_client.DefaultBadPinHandler)
+```
+
+The default handler prints:
+```
+this is the default bad pin handler
+```
+
+Or pass `nil` to skip the handler:
+
+```go
+tls_client.WithCertificatePinning(pins, nil)
+```
+
+## Complete example
+
+A real-world example with comprehensive certificate pinning:
+
+```go
+package main
+
+import (
+    "fmt"
+    "io"
+    "log"
+    "os"
+
+    http "github.com/bogdanfinn/fhttp"
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+)
+
+func main() {
+    // Certificate pins for multiple domains
+    pins := map[string][]string{
+        // Primary API
+        "api.example.com": {
+            // Current certificate
+            "NQvy9sFS99nBqk/nZCUF44hFhshrkvxqYtfrZq3i+Ww=",
+            // Backup certificate
+            "4a6cPehI7OG6cuDZka5NDZ7FR8a60d3auda+sKfg4Ng=",
+            // Root CA
+            "x4QzPSC810K5/cMjb05Qm4k3Bw5zBn4lTdO/nEW/Td4=",
+        },
+        
+        // All CDN subdomains
+        "*.cdn.example.com": {
+            "abc123...",
+            "def456...",
+        },
+    }
+
+    // Custom bad pin handler with alerting
+    badPinHandler := func(req *http.Request) {
+        msg := fmt.Sprintf(
+            "SECURITY: SSL pin mismatch for %s from %s",
+            req.URL.Host,
+            req.RemoteAddr,
+        )
+        
+        log.Println(msg)
+        
+        // Send to monitoring system
+        if err := sendSecurityAlert(msg); err != nil {
+            log.Printf("Failed to send alert: %v", err)
+        }
+        
+        // Log to file
+        f, err := os.OpenFile("security.log", 
+            os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+        if err == nil {
+            defer f.Close()
+            fmt.Fprintf(f, "%s\n", msg)
+        }
+    }
+
+    jar := tls_client.NewCookieJar()
+    
+    options := []tls_client.HttpClientOption{
+        tls_client.WithTimeoutSeconds(30),
+        tls_client.WithClientProfile(profiles.Chrome_133),
+        tls_client.WithCookieJar(jar),
+        tls_client.WithCertificatePinning(pins, badPinHandler),
+    }
+    
+    client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Make secure requests
+    testPinnedRequest(client, "https://api.example.com/secure-data")
+    testPinnedRequest(client, "https://media.cdn.example.com/image.jpg")
+}
+
+func testPinnedRequest(client tls_client.HttpClient, url string) {
+    log.Printf("Testing pinned request to: %s", url)
+    
+    req, err := http.NewRequest(http.MethodGet, url, nil)
+    if err != nil {
+        log.Printf("Failed to create request: %v", err)
+        return
+    }
+    
+    resp, err := client.Do(req)
+    if err != nil {
+        log.Printf("Request failed: %v", err)
+        return
+    }
+    defer resp.Body.Close()
+    
+    body, err := io.ReadAll(resp.Body)
+    if err != nil {
+        log.Printf("Failed to read body: %v", err)
+        return
+    }
+    
+    log.Printf("Success: %d bytes received", len(body))
+}
+
+func sendSecurityAlert(message string) error {
+    // Implementation depends on your monitoring system
+    // (PagerDuty, Slack, email, etc.)
+    return nil
+}
+```
+
+## Error handling
+
+Certificate pinning failures return specific errors:
+
+```go
+resp, err := client.Get("https://api.example.com")
+if err != nil {
+    // Check if it's a pinning error
+    if strings.Contains(err.Error(), "bad ssl pin detected") {
+        log.Println("Certificate pinning failed - possible MITM attack")
+        
+        // Don't retry
+        return err
+    }
+    
+    // Other error - could retry
+    log.Printf("Request error: %v", err)
+}
+```
+
+The error message includes the actual pins found:
+
+```
+bad ssl pin detected, found pins: [abc123... def456...]
+```
+
+## Certificate rotation
+
+When the server rotates certificates, update your pins:
+
+<Steps>
+
+### Monitor certificate expiration
+
+Set up alerts for certificates nearing expiration.
+
+### Generate new pins
+
+Before certificate rotation, generate pins for the new certificate:
+
+```bash
+hpkp-pins -server=api.example.com:443
+```
+
+### Update your application
+
+Add the new pins to your pin list **before** the certificate rotates:
+
+```go
+pins := map[string][]string{
+    "api.example.com": {
+        // Old certificate (still active)
+        "old-pin-1...",
+        "old-pin-2...",
+        
+        // New certificate (will be active soon)
+        "new-pin-1...",
+        "new-pin-2...",
+        
+        // Root CA (stays the same)
+        "root-ca-pin...",
+    },
+}
+```
+
+### Deploy before rotation
+
+Deploy the updated pins before the server rotates certificates.
+
+### Remove old pins
+
+After rotation is complete and verified, remove the old pins in the next deployment.
+
+</Steps>
+
+<Warning>
+If you only pin the current certificate and it rotates, your application will stop working. Always pin multiple certificates including backups and root CAs.
+</Warning>
+
+## Best practices
+
+<Steps>
+
+### Pin multiple certificates
+
+Always pin at least 3 certificates:
+- Current certificate
+- Backup certificate
+- Root CA certificate
+
+### Include root CA
+
+Pinning the root CA provides a fallback if leaf certificates change:
+
+```bash
+# Get root CA pin
+hpkp-pins -server=api.example.com:443
+# Look for root certificate in the chain
+```
+
+### Use wildcard pinning carefully
+
+Only use wildcard pins for domains you fully control:
+
+```go
+// Good: Your own domains
+"*.api.yourcompany.com": pins
+
+// Bad: Third-party domains
+"*.cloudflare.com": pins  // Don't do this
+```
+
+### Implement monitoring
+
+Monitor for pinning failures:
+
+```go
+badPinHandler := func(req *http.Request) {
+    metrics.Increment("ssl_pin_failure")
+    alerting.Send("SSL pin mismatch: " + req.URL.Host)
+}
+```
+
+### Test thoroughly
+
+Test certificate pinning in staging before production:
+
+```go
+// Staging environment with test pins
+stagingPins := map[string][]string{
+    "api.staging.example.com": {...},
+}
+
+// Production environment with production pins
+productionPins := map[string][]string{
+    "api.example.com": {...},
+}
+```
+
+### Document pin updates
+
+Keep a record of when and why pins were updated:
+
+```go
+// Last updated: 2024-01-15
+// Reason: Certificate rotation
+// Next review: 2024-06-15
+pins := map[string][]string{
+    "api.example.com": {...},
+}
+```
+
+</Steps>
+
+## Security considerations
+
+<Warning>
+Certificate pinning makes your application **more secure** but also **more fragile**. A misconfigured pin can break your entire application.
+</Warning>
+
+### Benefits
+
+- Prevents MITM attacks even if a CA is compromised
+- Protects against rogue certificates
+- Adds defense in depth
+- Detects network-level attacks
+
+### Risks
+
+- Application breaks if pins are outdated
+- Certificate rotation requires application updates
+- Emergency certificate changes can cause outages
+- Backup pins are critical for reliability
+
+### When to use certificate pinning
+
+Use certificate pinning when:
+- Handling sensitive data (financial, health, PII)
+- Communicating with your own infrastructure
+- High-security requirements
+- Risk of targeted attacks
+
+Don't use certificate pinning when:
+- Connecting to third-party APIs you don't control
+- Certificate rotation is unpredictable
+- Emergency response is difficult
+- Cost of outage exceeds security benefit
+
+## Testing certificate pinning
+
+Test that pinning works correctly:
+
+```go
+// Test with correct pins
+correctPins := map[string][]string{
+    "api.example.com": {"actual-pin..."},
+}
+
+client1, _ := tls_client.NewHttpClient(
+    tls_client.NewNoopLogger(),
+    tls_client.WithCertificatePinning(correctPins, nil),
+)
+
+resp1, err1 := client1.Get("https://api.example.com")
+// Should succeed
+
+// Test with incorrect pins
+incorrectPins := map[string][]string{
+    "api.example.com": {"wrong-pin..."},
+}
+
+client2, _ := tls_client.NewHttpClient(
+    tls_client.NewNoopLogger(),
+    tls_client.WithCertificatePinning(incorrectPins, nil),
+)
+
+resp2, err2 := client2.Get("https://api.example.com")
+// Should fail with bad pin error
+```
+
+## Next steps
+
+- Learn about [client options](/guides/client-options) for TLS configuration
+- Set up [proxy configuration](/guides/proxy-configuration) with pinning
+- Use [request hooks](/guides/request-hooks) to monitor pinning failures

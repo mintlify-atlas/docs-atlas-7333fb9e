@@ -1,0 +1,271 @@
+---
+title: Node.js bindings
+description: Using TLS Client from Node.js with ffi-napi
+---
+
+The TLS Client can be used from Node.js by loading the shared library with `ffi-napi`.
+
+## Installation
+
+First, install the required dependency:
+
+```bash
+npm install ffi-napi
+```
+
+## Loading the library
+
+Download the appropriate shared library for your platform:
+
+- macOS: `tls-client-darwin-amd64-1.7.2.dylib`
+- Linux: `tls-client-xgo-1.7.2-linux-amd64.so`
+- Windows: `tls-client-windows-64-1.7.2.dll`
+
+Load the library and define the available functions:
+
+```javascript
+const ffi = require('ffi-napi');
+
+const tlsClientLibrary = ffi.Library('./tls-client-darwin-amd64-1.7.2.dylib', {
+    'request': ['string', ['string']],
+    'getCookiesFromSession': ['string', ['string']],
+    'addCookiesToSession': ['string', ['string']],
+    'freeMemory': ["void", ['string']],
+    'destroyAll': ['string', []],
+    'destroySession': ['string', ['string']]
+});
+```
+
+## Making a request
+
+Create a request payload and call the `request` function:
+
+```javascript
+const requestPayload = {
+    "tlsClientIdentifier": "chrome_103",
+    "followRedirects": true,
+    "insecureSkipVerify": false,
+    "withoutCookieJar": false,
+    "withCustomCookieJar": false,
+    "isByteRequest": false,
+    "catchPanics": false,
+    "withDebug": false,
+    "forceHttp1": false,
+    "withRandomTLSExtensionOrder": false,
+    "timeoutSeconds": 30,
+    "timeoutMilliseconds": 0,
+    "sessionId": "my-session-id",
+    "proxyUrl": "",
+    "isRotatingProxy": false,
+    "certificatePinningHosts": {},
+    "headers": {
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Safari/537.36",
+        "accept-encoding": "gzip, deflate, br",
+        "accept-language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7"
+    },
+    "headerOrder": [
+        "accept",
+        "user-agent",
+        "accept-encoding",
+        "accept-language"
+    ],
+    "requestUrl": "https://microsoft.com",
+    "requestMethod": "GET",
+    "requestBody": "",
+    "requestCookies": []
+};
+
+// Call the library with the requestPayload as string
+const response = tlsClientLibrary.request(JSON.stringify(requestPayload));
+
+// Convert response string to JSON
+const responseObject = JSON.parse(response);
+
+console.log(responseObject);
+
+// Free memory after processing
+tlsClientLibrary.freeMemory(responseObject.id);
+```
+
+## Working with sessions
+
+Sessions allow you to maintain cookies and connection state across multiple requests.
+
+### Getting cookies from a session
+
+```javascript
+const payload = {
+    sessionId: 'my-session-id',
+    url: "https://microsoft.com",
+};
+
+const cookiesResponse = tlsClientLibrary.getCookiesFromSession(JSON.stringify(payload));
+const cookiesInSession = JSON.parse(cookiesResponse);
+
+console.log(cookiesInSession);
+```
+
+### Adding cookies to a session
+
+```javascript
+const cookiesPayload = {
+    sessionId: 'my-session-id',
+    url: "https://microsoft.com",
+    cookies: [
+        {
+            name: "session_token",
+            value: "abc123",
+            domain: "microsoft.com",
+            path: "/"
+        }
+    ]
+};
+
+const addCookiesResponse = tlsClientLibrary.addCookiesToSession(JSON.stringify(cookiesPayload));
+const updatedCookies = JSON.parse(addCookiesResponse);
+
+console.log(updatedCookies);
+```
+
+### Destroying a session
+
+When you're done with a session, free its resources:
+
+```javascript
+const destroySessionPayload = {
+    sessionId: 'my-session-id',
+};
+
+const destroySessionResponse = tlsClientLibrary.destroySession(JSON.stringify(destroySessionPayload));
+const destroySessionResponseParsed = JSON.parse(destroySessionResponse);
+
+console.log(destroySessionResponseParsed);
+// { id: "...", success: true }
+```
+
+## Complete example
+
+Here's a complete working example:
+
+```javascript
+const ffi = require('ffi-napi');
+
+// Load the TLS Client shared library
+const tlsClientLibrary = ffi.Library('./tls-client-darwin-amd64-1.7.2.dylib', {
+    'request': ['string', ['string']],
+    'getCookiesFromSession': ['string', ['string']],
+    'addCookiesToSession': ['string', ['string']],
+    'freeMemory': ["void", ['string']],
+    'destroyAll': ['string', []],
+    'destroySession': ['string', ['string']]
+});
+
+const requestPayload = {
+    "tlsClientIdentifier": "chrome_103",
+    "followRedirects": true,
+    "insecureSkipVerify": false,
+    "withoutCookieJar": false,
+    "withCustomCookieJar": false,
+    "isByteRequest": false,
+    "catchPanics": false,
+    "withDebug": false,
+    "forceHttp1": false,
+    "withRandomTLSExtensionOrder": false,
+    "timeoutSeconds": 30,
+    "timeoutMilliseconds": 0,
+    "sessionId": "my-session-id",
+    "proxyUrl": "",
+    "isRotatingProxy": false,
+    "certificatePinningHosts": {},
+    "headers": {
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Safari/537.36",
+        "accept-encoding": "gzip, deflate, br",
+        "accept-language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7"
+    },
+    "headerOrder": [
+        "accept",
+        "user-agent",
+        "accept-encoding",
+        "accept-language"
+    ],
+    "requestUrl": "https://microsoft.com",
+    "requestMethod": "GET",
+    "requestBody": "",
+    "requestCookies": []
+};
+
+// Make the request
+const response = tlsClientLibrary.request(JSON.stringify(requestPayload));
+const responseObject = JSON.parse(response);
+
+console.log(responseObject);
+tlsClientLibrary.freeMemory(responseObject.id);
+
+// Get cookies from the session
+const payload = {
+    sessionId: 'my-session-id',
+    url: "https://microsoft.com",
+};
+
+const cookiesResponse = tlsClientLibrary.getCookiesFromSession(JSON.stringify(payload));
+const cookiesInSession = JSON.parse(cookiesResponse);
+
+console.log(cookiesInSession);
+
+// Destroy the session when done
+const destroySessionPayload = {
+    sessionId: 'my-session-id',
+};
+
+const destroySessionResponse = tlsClientLibrary.destroySession(JSON.stringify(destroySessionPayload));
+const destroySessionResponseParsed = JSON.parse(destroySessionResponse);
+
+console.log(destroySessionResponseParsed);
+```
+
+## Error handling
+
+Check the response status to detect errors:
+
+```javascript
+const response = tlsClientLibrary.request(JSON.stringify(requestPayload));
+const responseObject = JSON.parse(response);
+
+if (responseObject.status === 0) {
+    console.error('Request failed:', responseObject.body);
+} else {
+    console.log('Success:', responseObject.body);
+}
+
+tlsClientLibrary.freeMemory(responseObject.id);
+```
+
+## Platform-specific library names
+
+Make sure to use the correct library file for your platform:
+
+<Tabs>
+  <Tab title="macOS">
+    ```javascript
+    const tlsClientLibrary = ffi.Library('./tls-client-darwin-amd64-1.7.2.dylib', {
+        // ...
+    });
+    ```
+  </Tab>
+  <Tab title="Linux">
+    ```javascript
+    const tlsClientLibrary = ffi.Library('./tls-client-xgo-1.7.2-linux-amd64.so', {
+        // ...
+    });
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```javascript
+    const tlsClientLibrary = ffi.Library('./tls-client-windows-64-1.7.2.dll', {
+        // ...
+    });
+    ```
+  </Tab>
+</Tabs>

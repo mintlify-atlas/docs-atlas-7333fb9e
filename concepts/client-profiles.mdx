@@ -1,0 +1,342 @@
+---
+title: Client profiles
+description: Understanding the browser profile system that controls TLS and HTTP fingerprints
+---
+
+## What are client profiles?
+
+Client profiles are pre-configured settings that replicate the exact TLS and HTTP fingerprints of real browsers. Each profile contains:
+
+- **TLS fingerprint** - ClientHello parameters, cipher suites, extensions
+- **HTTP/2 settings** - SETTINGS frames, priorities, flow control
+- **HTTP/3 settings** - QUIC parameters, frame types, pseudo-header order
+- **Protocol behavior** - Connection flow, stream IDs, GREASE values
+
+<Info>
+Profiles are extracted from real browser traffic captures and updated regularly to match the latest browser versions.
+</Info>
+
+## Available browser profiles
+
+The library includes profiles for major browsers across versions:
+
+### Chrome profiles
+
+```go
+import "github.com/bogdanfinn/tls-client/profiles"
+
+// Latest versions
+profiles.Chrome_146
+profiles.Chrome_146_PSK  // With session resumption
+profiles.Chrome_144
+profiles.Chrome_144_PSK
+profiles.Chrome_133
+profiles.Chrome_133_PSK
+
+// Older versions
+profiles.Chrome_131
+profiles.Chrome_130_PSK
+profiles.Chrome_124
+profiles.Chrome_120
+// ... and more
+```
+
+<Note>
+PSK (Pre-Shared Key) variants support TLS session resumption, which is more realistic for simulating returning users.
+</Note>
+
+### Firefox profiles
+
+```go
+profiles.Firefox_147
+profiles.Firefox_147_PSK
+profiles.Firefox_146_PSK
+profiles.Firefox_135
+profiles.Firefox_133
+profiles.Firefox_132
+// ... and more
+```
+
+### Safari profiles
+
+```go
+// Desktop Safari
+profiles.Safari_16_0
+profiles.Safari_15_6_1
+
+// iOS Safari
+profiles.Safari_IOS_26_0
+profiles.Safari_IOS_18_5
+profiles.Safari_IOS_18_0
+profiles.Safari_IOS_17_0
+profiles.Safari_IOS_16_0
+
+// iPad Safari
+profiles.Safari_Ipad_15_6
+```
+
+### Other browsers
+
+```go
+// Opera
+profiles.Opera_91
+profiles.Opera_90
+profiles.Opera_89
+```
+
+## Anatomy of a client profile
+
+Each profile is a structured configuration defined in [`profiles/profiles.go:89`](https://github.com/bogdanfinn/tls-client/blob/master/profiles/profiles.go#L89):
+
+```go
+type ClientProfile struct {
+    clientHelloId          tls.ClientHelloID
+    headerPriority         *http2.PriorityParam
+    settings               map[http2.SettingID]uint32
+    settingsOrder          []http2.SettingID
+    priorities             []http2.Priority
+    pseudoHeaderOrder      []string
+    connectionFlow         uint32
+    streamID               uint32
+    allowHTTP              bool
+    http3Settings          map[uint64]uint64
+    http3SettingsOrder     []uint64
+    http3PriorityParam     uint32
+    http3PseudoHeaderOrder []string
+    http3SendGreaseFrames  bool
+}
+```
+
+### TLS layer
+
+The `clientHelloId` defines the TLS fingerprint:
+
+```go
+clientHelloId: tls.ClientHelloID{
+    Client:  "Chrome",
+    Version: "146_PSK",
+    SpecFactory: func() (tls.ClientHelloSpec, error) {
+        return tls.ClientHelloSpec{
+            CipherSuites: []uint16{
+                tls.GREASE_PLACEHOLDER,
+                tls.TLS_AES_128_GCM_SHA256,
+                tls.TLS_AES_256_GCM_SHA384,
+                tls.TLS_CHACHA20_POLY1305_SHA256,
+                // ...
+            },
+            Extensions: []tls.TLSExtension{
+                &tls.UtlsGREASEExtension{},
+                &tls.ApplicationSettingsExtensionNew{},
+                &tls.SupportedVersionsExtension{},
+                // ...
+            },
+        }, nil
+    },
+}
+```
+
+<Tip>
+GREASE (Generate Random Extensions And Sustain Extensibility) values are random placeholders that prevent fingerprint ossification. Chrome uses them, Firefox doesn't.
+</Tip>
+
+### HTTP/2 layer
+
+HTTP/2 settings define frame parameters:
+
+```go
+settings: map[http2.SettingID]uint32{
+    http2.SettingHeaderTableSize:   65536,
+    http2.SettingEnablePush:        0,
+    http2.SettingInitialWindowSize: 6291456,
+    http2.SettingMaxHeaderListSize: 262144,
+},
+settingsOrder: []http2.SettingID{
+    http2.SettingHeaderTableSize,
+    http2.SettingEnablePush,
+    http2.SettingInitialWindowSize,
+    http2.SettingMaxHeaderListSize,
+},
+pseudoHeaderOrder: []string{
+    ":method",
+    ":authority",
+    ":scheme",
+    ":path",
+},
+connectionFlow: 15663105,
+```
+
+<Info>
+The order of settings and pseudo-headers is as important as the values themselves for accurate fingerprinting.
+</Info>
+
+### HTTP/3 layer
+
+HTTP/3 profiles include QUIC-specific settings:
+
+```go
+http3Settings: map[uint64]uint64{
+    0x01: 8,      // SETTINGS_MAX_FIELD_SECTION_SIZE
+    0x06: 262144, // SETTINGS_MAX_HEADER_LIST_SIZE
+    0x33: 1,      // H3_DATAGRAM
+},
+http3SettingsOrder: []uint64{0x01, 0x06, 0x33},
+http3PriorityParam: 3,
+http3SendGreaseFrames: true,
+http3PseudoHeaderOrder: []string{
+    ":method",
+    ":authority",
+    ":scheme",
+    ":path",
+},
+```
+
+## Using profiles
+
+### Basic usage
+
+```go
+import (
+    tls_client "github.com/bogdanfinn/tls-client"
+    "github.com/bogdanfinn/tls-client/profiles"
+)
+
+client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+    tls_client.WithClientProfile(profiles.Chrome_146),
+)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+### Dynamic profile selection
+
+Select profiles at runtime based on string identifiers:
+
+```go
+profileName := "chrome_146" // from config or user input
+
+profile, exists := profiles.MappedTLSClients[profileName]
+if !exists {
+    profile = profiles.DefaultClientProfile // Chrome_133
+}
+
+client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+    tls_client.WithClientProfile(profile),
+)
+```
+
+Available string identifiers are defined in [`profiles/profiles.go:10`](https://github.com/bogdanfinn/tls-client/blob/master/profiles/profiles.go#L10):
+
+```go
+var MappedTLSClients = map[string]ClientProfile{
+    "chrome_146":          Chrome_146,
+    "chrome_146_PSK":      Chrome_146_PSK,
+    "firefox_147":         Firefox_147,
+    "safari_ios_26_0":     Safari_IOS_26_0,
+    // ...
+}
+```
+
+## Browser differences
+
+Different browsers have distinct fingerprinting characteristics:
+
+### Chrome characteristics
+
+- Uses GREASE extensions and values
+- Supports HTTP/3 with specific QUIC settings
+- Sends H3_DATAGRAM setting (0x33)
+- Includes MLKEM768 post-quantum key exchange
+- Uses Brotli certificate compression
+
+### Firefox characteristics
+
+- No GREASE in TLS handshake
+- Different cipher suite ordering
+- Sends GREASE frames in HTTP/3 but not GREASE settings
+- Doesn't send SETTINGS_MAX_FIELD_SECTION_SIZE in HTTP/3
+- Different HTTP/2 priority scheme
+
+### Safari characteristics
+
+- Unique TLS extension ordering
+- iOS vs desktop variations
+- Different supported curves
+- Specific HTTP/2 window sizes
+
+<Warning>
+Mixing incompatible settings (e.g., Chrome TLS with Firefox HTTP/2 settings) creates detectable anomalies. Always use complete, tested profiles.
+</Warning>
+
+## Choosing the right profile
+
+Consider these factors when selecting a profile:
+
+1. **Target website** - Match the most common visitor browser
+2. **Geographic region** - Chrome dominates globally, but Safari is significant in iOS-heavy markets
+3. **Update frequency** - Newer versions may be less widely deployed
+4. **Session resumption** - Use PSK variants for multi-request scenarios
+
+```go
+// For general web scraping
+profiles.Chrome_144  // Widely deployed, stable fingerprint
+
+// For iOS-specific targets
+profiles.Safari_IOS_18_5  // Latest stable iOS Safari
+
+// For session persistence
+profiles.Chrome_146_PSK  // With TLS session resumption
+```
+
+<Tip>
+Monitor your target website's legitimate traffic to understand which browser versions are most common, then match those profiles.
+</Tip>
+
+## Profile updates
+
+Browser fingerprints change with each browser release. The library is updated to include:
+
+- New browser versions as they're released
+- Changes to TLS extensions and cipher suites
+- Updated HTTP/2 and HTTP/3 parameters
+- New features like post-quantum cryptography
+
+Check the [GitHub repository](https://github.com/bogdanfinn/tls-client) for the latest profile updates.
+
+## Custom profiles
+
+For advanced use cases, you can create custom profiles:
+
+```go
+customProfile := profiles.NewClientProfile(
+    customClientHelloId,
+    customHTTP2Settings,
+    customSettingsOrder,
+    customPseudoHeaderOrder,
+    customConnectionFlow,
+    customPriorities,
+    customHeaderPriority,
+    customStreamID,
+    allowHTTP,
+    customHTTP3Settings,
+    customHTTP3SettingsOrder,
+    customHTTP3PriorityParam,
+    customHTTP3PseudoHeaderOrder,
+    customHTTP3SendGreaseFrames,
+)
+```
+
+<Warning>
+Creating custom profiles requires deep knowledge of TLS, HTTP/2, and HTTP/3 specifications. Incorrect configurations will be easily detected.
+</Warning>
+
+## Related resources
+
+<CardGroup cols={2}>
+  <Card title="TLS fingerprinting" icon="fingerprint" href="/concepts/tls-fingerprinting">
+    Learn about TLS fingerprinting basics
+  </Card>
+  <Card title="HTTP protocols" icon="globe" href="/concepts/http-protocols">
+    Understand protocol support and negotiation
+  </Card>
+</CardGroup>

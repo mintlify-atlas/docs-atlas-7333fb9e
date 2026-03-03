@@ -1,0 +1,385 @@
+---
+title: Python bindings
+description: Using TLS Client from Python with ctypes
+---
+
+The TLS Client can be used from Python by loading the shared library with `ctypes`.
+
+## Installation
+
+No additional dependencies are required - `ctypes` is part of Python's standard library.
+
+## Loading the library
+
+Download the appropriate shared library for your platform:
+
+- macOS: `tls-client-darwin-amd64-1.7.2.dylib`
+- Linux: `tls-client-xgo-1.7.2-linux-amd64.so`
+- Windows: `tls-client-windows-64-1.7.2.dll`
+
+Load the library and define the available functions:
+
+```python
+import ctypes
+import json
+
+# Load the TLS Client shared library
+library = ctypes.cdll.LoadLibrary('./tls-client-darwin-amd64-1.7.2.dylib')
+
+# Define the request function
+request = library.request
+request.argtypes = [ctypes.c_char_p]
+request.restype = ctypes.c_char_p
+
+# Define cookie management functions
+getCookiesFromSession = library.getCookiesFromSession
+getCookiesFromSession.argtypes = [ctypes.c_char_p]
+getCookiesFromSession.restype = ctypes.c_char_p
+
+addCookiesToSession = library.addCookiesToSession
+addCookiesToSession.argtypes = [ctypes.c_char_p]
+addCookiesToSession.restype = ctypes.c_char_p
+
+# Define session management functions
+freeMemory = library.freeMemory
+freeMemory.argtypes = [ctypes.c_char_p]
+
+destroySession = library.destroySession
+destroySession.argtypes = [ctypes.c_char_p]
+destroySession.restype = ctypes.c_char_p
+
+destroyAll = library.destroyAll
+destroyAll.restype = ctypes.c_char_p
+```
+
+## Making a request
+
+Create a request payload and call the `request` function:
+
+```python
+requestPayload = {
+    "tlsClientIdentifier": "chrome_105",
+    "followRedirects": False,
+    "insecureSkipVerify": False,
+    "withoutCookieJar": False,
+    "withCustomCookieJar": False,
+    "isByteRequest": False,
+    "forceHttp1": False,
+    "withDebug": False,
+    "catchPanics": False,
+    "withRandomTLSExtensionOrder": False,
+    "timeoutSeconds": 30,
+    "timeoutMilliseconds": 0,
+    "sessionId": "my-session-id",
+    "proxyUrl": "",
+    "isRotatingProxy": False,
+    "certificatePinningHosts": {},
+    "headers": {
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Safari/537.36",
+        "accept-encoding": "gzip, deflate, br",
+        "accept-language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7"
+    },
+    "headerOrder": [
+        "accept",
+        "user-agent",
+        "accept-encoding",
+        "accept-language"
+    ],
+    "requestUrl": "https://microsoft.com",
+    "requestMethod": "GET",
+    "requestBody": "",
+    "requestCookies": []
+}
+
+# Make the request (returns a pointer)
+response = request(json.dumps(requestPayload).encode('utf-8'))
+
+# Dereference the pointer to a byte array
+response_bytes = ctypes.string_at(response)
+
+# Convert to string and parse JSON
+response_string = response_bytes.decode('utf-8')
+response_object = json.loads(response_string)
+
+print(response_object)
+```
+
+## Working with sessions
+
+Sessions allow you to maintain cookies and connection state across multiple requests.
+
+### Getting cookies from a session
+
+```python
+cookiePayload = {
+    "sessionId": "my-session-id",
+    "url": "https://microsoft.com",
+}
+
+cookieResponse = getCookiesFromSession(json.dumps(cookiePayload).encode('utf-8'))
+cookieResponse_bytes = ctypes.string_at(cookieResponse)
+cookieResponse_string = cookieResponse_bytes.decode('utf-8')
+cookieResponse_object = json.loads(cookieResponse_string)
+
+print(cookieResponse_object)
+```
+
+### Adding cookies to a session
+
+```python
+cookiesPayload = {
+    "cookies": [
+        {
+            "name": "foo",
+            "value": "bar",
+        },
+        {
+            "name": "session_token",
+            "value": "abc123",
+        }
+    ],
+    "sessionId": "my-session-id",
+    "url": "https://microsoft.com",
+}
+
+addCookiesResponse = addCookiesToSession(json.dumps(cookiesPayload).encode('utf-8'))
+addCookies_bytes = ctypes.string_at(addCookiesResponse)
+addCookies_string = addCookies_bytes.decode('utf-8')
+addCookies_object = json.loads(addCookies_string)
+
+print(addCookies_object)
+```
+
+### Destroying a session
+
+When you're done with a session, free its resources:
+
+```python
+destroySessionPayload = {
+    "sessionId": "my-session-id",
+}
+
+destroySessionResponse = destroySession(json.dumps(destroySessionPayload).encode('utf-8'))
+destroySessionResponse_bytes = ctypes.string_at(destroySessionResponse)
+destroySessionResponse_string = destroySessionResponse_bytes.decode('utf-8')
+destroySessionResponse_object = json.loads(destroySessionResponse_string)
+
+print(destroySessionResponse_object)
+# {'id': '...', 'success': True}
+```
+
+## Making POST requests
+
+To send data in a POST request, set the request body and appropriate headers:
+
+```python
+requestPayload = {
+    "tlsClientIdentifier": "chrome_103",
+    "followRedirects": False,
+    "insecureSkipVerify": False,
+    "withoutCookieJar": False,
+    "withCustomCookieJar": False,
+    "forceHttp1": False,
+    "withDebug": False,
+    "withRandomTLSExtensionOrder": False,
+    "isByteResponse": False,
+    "isByteRequest": False,
+    "catchPanics": False,
+    "timeoutSeconds": 30,
+    "timeoutMilliseconds": 0,
+    "certificatePinningHosts": {},
+    "proxyUrl": "",
+    "isRotatingProxy": False,
+    "headers": {
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Safari/537.36",
+        "accept-encoding": "gzip, deflate, br",
+        "content-type": "application/x-www-form-urlencoded",
+        "accept-language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7"
+    },
+    "headerOrder": [
+        "accept",
+        "user-agent",
+        "content-type",
+        "accept-encoding",
+        "accept-language"
+    ],
+    "requestUrl": "https://example.com/api/endpoint",
+    "requestMethod": "POST",
+    "requestBody": "foo=bar&baz=foo",
+    "requestCookies": []
+}
+
+response = request(json.dumps(requestPayload).encode('utf-8'))
+response_bytes = ctypes.string_at(response)
+response_string = response_bytes.decode('utf-8')
+response_object = json.loads(response_string)
+
+print(response_object)
+```
+
+## Sending request cookies
+
+You can include cookies directly in a request without using sessions:
+
+```python
+requestPayload = {
+    "tlsClientIdentifier": "chrome_105",
+    "followRedirects": False,
+    "insecureSkipVerify": False,
+    "withoutCookieJar": False,
+    "withCustomCookieJar": False,
+    "isByteRequest": False,
+    "forceHttp1": False,
+    "withDebug": False,
+    "catchPanics": False,
+    "withRandomTLSExtensionOrder": False,
+    "timeoutSeconds": 30,
+    "timeoutMilliseconds": 0,
+    "sessionId": "my-session-id",
+    "proxyUrl": "",
+    "isRotatingProxy": False,
+    "certificatePinningHosts": {},
+    "headers": {
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Safari/537.36",
+        "accept-encoding": "gzip, deflate, br",
+        "accept-language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7"
+    },
+    "headerOrder": [
+        "accept",
+        "user-agent",
+        "accept-encoding",
+        "accept-language"
+    ],
+    "requestUrl": "https://microsoft.com",
+    "requestMethod": "GET",
+    "requestBody": "",
+    "requestCookies": [
+        {
+            "name": "foo",
+            "value": "bar",
+        },
+        {
+            "name": "session",
+            "value": "abc123",
+        }
+    ]
+}
+
+response = request(json.dumps(requestPayload).encode('utf-8'))
+response_bytes = ctypes.string_at(response)
+response_string = response_bytes.decode('utf-8')
+response_object = json.loads(response_string)
+
+print(response_object)
+```
+
+## Using custom TLS clients
+
+You can define a custom TLS client with specific JA3 fingerprints and HTTP/2 settings:
+
+```python
+requestPayload = {
+    "followRedirects": False,
+    "insecureSkipVerify": False,
+    "withoutCookieJar": False,
+    "withCustomCookieJar": False,
+    "isByteRequest": False,
+    "forceHttp1": False,
+    "catchPanics": False,
+    "withDebug": False,
+    "withRandomTLSExtensionOrder": False,
+    "timeoutSeconds": 30,
+    "timeoutMilliseconds": 0,
+    "sessionId": "custom-session-id",
+    "certificatePinningHosts": {},
+    "customTlsClient": {
+        "ja3String": "771,2570-4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,2570-0-23-65281-10-11-35-16-5-13-18-51-45-43-27-17513-2570-21,2570-29-23-24,0",
+        "h2Settings": {
+            "HEADER_TABLE_SIZE": 65536,
+            "MAX_CONCURRENT_STREAMS": 1000,
+            "INITIAL_WINDOW_SIZE": 6291456,
+            "MAX_HEADER_LIST_SIZE": 262144
+        },
+        "h2SettingsOrder": [
+            "HEADER_TABLE_SIZE",
+            "MAX_CONCURRENT_STREAMS",
+            "INITIAL_WINDOW_SIZE",
+            "MAX_HEADER_LIST_SIZE"
+        ],
+        "supportedSignatureAlgorithms": [
+            "ECDSAWithP256AndSHA256",
+            "PSSWithSHA256",
+            "PKCS1WithSHA256",
+            "ECDSAWithP384AndSHA384",
+            "PSSWithSHA384",
+            "PKCS1WithSHA384",
+            "PSSWithSHA512",
+            "PKCS1WithSHA512",
+        ],
+        "supportedVersions": ["GREASE", "1.3", "1.2"],
+        "keyShareCurves": ["GREASE", "X25519"],
+        "certCompressionAlgos": ["brotli"],
+        "alpnProtocols": ["h2", "http/1.1"],
+        "alpsProtocols": ["h2"],
+        "pseudoHeaderOrder": [
+            ":method",
+            ":authority",
+            ":scheme",
+            ":path"
+        ],
+        "connectionFlow": 15663105,
+        "priorityFrames": [],
+        "headerPriority": None,
+    },
+    "proxyUrl": "",
+    "isRotatingProxy": False,
+    "headers": {
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Safari/537.36",
+        "accept-encoding": "gzip, deflate, br",
+        "accept-language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7"
+    },
+    "headerOrder": [
+        "accept",
+        "user-agent",
+        "accept-encoding",
+        "accept-language"
+    ],
+    "requestUrl": "https://microsoft.com",
+    "requestMethod": "GET",
+    "requestBody": "",
+    "requestCookies": []
+}
+
+response = request(json.dumps(requestPayload).encode('utf-8'))
+response_bytes = ctypes.string_at(response)
+response_string = response_bytes.decode('utf-8')
+response_object = json.loads(response_string)
+
+print(response_object)
+```
+
+## Platform-specific library names
+
+Make sure to use the correct library file for your platform:
+
+<Tabs>
+  <Tab title="macOS">
+    ```python
+    library = ctypes.cdll.LoadLibrary('./tls-client-darwin-amd64-1.7.2.dylib')
+    ```
+  </Tab>
+  <Tab title="Linux">
+    ```python
+    library = ctypes.cdll.LoadLibrary('./tls-client-xgo-1.7.2-linux-amd64.so')
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```python
+    library = ctypes.cdll.LoadLibrary('./tls-client-windows-64-1.7.2.dll')
+    ```
+  </Tab>
+</Tabs>

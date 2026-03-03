@@ -1,0 +1,208 @@
+---
+title: ClientProfile type
+description: Browser fingerprint profiles for TLS and HTTP/2 configuration
+---
+
+The `ClientProfile` type defines a complete browser fingerprint profile, including TLS handshake configuration and HTTP/2 settings. Profiles allow your HTTP client to mimic real browsers at the TLS and protocol level.
+
+## Overview
+
+A ClientProfile combines:
+- **TLS fingerprint**: Client Hello configuration (cipher suites, extensions, curves)
+- **HTTP/2 settings**: Frame settings, priorities, connection flow
+- **HTTP/3 settings**: QUIC and HTTP/3 configuration (for supported profiles)
+
+The library includes 80+ pre-configured profiles mimicking popular browsers across different versions and platforms.
+
+## Type definition
+
+```go
+type ClientProfile struct {
+    // TLS configuration
+    clientHelloId          tls.ClientHelloID
+    
+    // HTTP/2 settings
+    settings               map[http2.SettingID]uint32
+    settingsOrder          []http2.SettingID
+    pseudoHeaderOrder      []string
+    connectionFlow         uint32
+    headerPriority         *http2.PriorityParam
+    priorities             []http2.Priority
+    streamID               uint32
+    allowHTTP              bool
+    
+    // HTTP/3 settings
+    http3Settings          map[uint64]uint64
+    http3SettingsOrder     []uint64
+    http3PriorityParam     uint32
+    http3PseudoHeaderOrder []string
+    http3SendGreaseFrames  bool
+}
+```
+
+## Fields
+
+### clientHelloId
+TLS Client Hello configuration including cipher suites, supported groups, extensions, and their order.
+
+### settings
+HTTP/2 SETTINGS frame parameters mapping setting IDs to values.
+
+### settingsOrder
+Order in which HTTP/2 SETTINGS are sent in the SETTINGS frame.
+
+### pseudoHeaderOrder
+Order of HTTP/2 pseudo-headers (`:method`, `:authority`, `:scheme`, `:path`).
+
+### connectionFlow
+HTTP/2 connection-level flow control window size.
+
+### headerPriority
+Default priority for request streams.
+
+### priorities
+Stream priority tree configuration (Firefox profiles).
+
+### streamID
+Initial stream ID.
+
+### allowHTTP
+Whether to allow HTTP/1.1 connections.
+
+### http3Settings
+HTTP/3 QUIC settings frame parameters.
+
+### http3SettingsOrder
+Order of HTTP/3 settings.
+
+### http3PriorityParam
+HTTP/3 priority parameters.
+
+### http3PseudoHeaderOrder
+Order of HTTP/3 pseudo-headers.
+
+### http3SendGreaseFrames
+Whether to send GREASE frames for HTTP/3.
+
+## Usage
+
+Profiles are selected by name using the `WithClientProfile` option:
+
+```go
+options := []tlsclient.HttpClientOption{
+    tlsclient.WithClientProfile(profiles.Chrome_133),
+}
+
+client, err := tlsclient.NewHttpClient(tlsclient.NewNoopLogger(), options...)
+```
+
+You can also reference profiles by string name from the `MappedTLSClients` map:
+
+```go
+profile := profiles.MappedTLSClients["chrome_133"]
+options := []tlsclient.HttpClientOption{
+    tlsclient.WithClientProfile(profile),
+}
+```
+
+## Default profile
+
+If no profile is specified, the library uses `profiles.Chrome_133` as the default.
+
+```go
+var DefaultClientProfile = Chrome_133
+```
+
+## Available profiles
+
+See [Available profiles](/api/available-profiles) for a complete list of all browser profiles.
+
+## Creating custom profiles
+
+You can create custom profiles using the `NewClientProfile` constructor:
+
+```go
+func NewClientProfile(
+    clientHelloId tls.ClientHelloID,
+    settings map[http2.SettingID]uint32,
+    settingsOrder []http2.SettingID,
+    pseudoHeaderOrder []string,
+    connectionFlow uint32,
+    priorities []http2.Priority,
+    headerPriority *http2.PriorityParam,
+    streamID uint32,
+    allowHTTP bool,
+    http3Settings map[uint64]uint64,
+    http3SettingsOrder []uint64,
+    http3PriorityParam uint32,
+    http3PseudoHeaderOrder []string,
+    http3SendGreaseFrames bool,
+) ClientProfile
+```
+
+## Profile methods
+
+The ClientProfile type provides getter methods for accessing configuration:
+
+```go
+GetClientHelloId() tls.ClientHelloID
+GetClientHelloSpec() (tls.ClientHelloSpec, error)
+GetClientHelloStr() string
+GetSettings() map[http2.SettingID]uint32
+GetSettingsOrder() []http2.SettingID
+GetConnectionFlow() uint32
+GetPseudoHeaderOrder() []string
+GetHeaderPriority() *http2.PriorityParam
+GetPriorities() []http2.Priority
+GetStreamID() uint32
+GetAllowHTTP() bool
+GetHttp3Settings() map[uint64]uint64
+GetHttp3SettingsOrder() []uint64
+GetHttp3PriorityParam() uint32
+GetHttp3PseudoHeaderOrder() []string
+GetHttp3SendGreaseFrames() bool
+```
+
+## Examples
+
+### Using a Chrome profile
+
+```go
+client, err := tlsclient.NewHttpClient(
+    tlsclient.NewNoopLogger(),
+    tlsclient.WithClientProfile(profiles.Chrome_146),
+)
+```
+
+### Using a Firefox profile
+
+```go
+client, err := tlsclient.NewHttpClient(
+    tlsclient.NewNoopLogger(),
+    tlsclient.WithClientProfile(profiles.Firefox_147),
+)
+```
+
+### Using a mobile Safari profile
+
+```go
+client, err := tlsclient.NewHttpClient(
+    tlsclient.NewNoopLogger(),
+    tlsclient.WithClientProfile(profiles.Safari_IOS_18_5),
+)
+```
+
+### Dynamic profile selection
+
+```go
+profileName := "firefox_147"
+profile, exists := profiles.MappedTLSClients[profileName]
+if !exists {
+    return fmt.Errorf("unknown profile: %s", profileName)
+}
+
+client, err := tlsclient.NewHttpClient(
+    tlsclient.NewNoopLogger(),
+    tlsclient.WithClientProfile(profile),
+)
+```
